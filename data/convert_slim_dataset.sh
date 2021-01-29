@@ -3,39 +3,39 @@
 # * synthetic_data
 
 # Kwargs
-export DATASET_DIR=${1:-$HOME/resources/slim}
+export DATASET_DIR=${1:-$HOME/Corpora/slim/original_data}
 
 
 # Convert tfrecords to gzip files
-# python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
-#                                   --dataset "turk_data" \
-#                                   --mode "train" \
-#                                   --first-n -1 \
-#                                   --batch-size 200
+python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
+                                  --dataset "turk_data" \
+                                  --mode "train" \
+                                  --first-n -1 \
+                                  --batch-size 200
 
-# echo "turk_data/train Completed"
+echo "turk_data/train Completed"
 
-# python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
-#                                   --dataset "turk_data" \
-#                                   --mode "valid" \
-#                                   --first-n -1 \
-#                                   --batch-size 200
+python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
+                                  --dataset "turk_data" \
+                                  --mode "valid" \
+                                  --first-n -1 \
+                                  --batch-size 200
 
-# echo "turk_data/valid Completed"
+echo "turk_data/valid Completed"
 
-# python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
-#                                   --dataset "turk_data" \
-#                                   --mode "test" \
-#                                   --first-n -1 \
-#                                   --batch-size 200
+python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
+                                  --dataset "turk_data" \
+                                  --mode "test" \
+                                  --first-n -1 \
+                                  --batch-size 200
 
-# echo "turk_data/test Completed"
+echo "turk_data/test Completed"
 
-# python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
-#                                   --dataset "synthetic_data" \
-#                                   --mode "valid" \
-#                                   --first-n -1 \
-#                                   --batch-size 200
+python3 ./convert_slim_dataset.py --dataset_path ${DATASET_DIR} \
+                                  --dataset "synthetic_data" \
+                                  --mode "valid" \
+                                  --first-n -1 \
+                                  --batch-size 200
 
 echo "turk_data/valid Completed"
 
