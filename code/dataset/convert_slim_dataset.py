@@ -1,3 +1,8 @@
+"""
+Modified from
+https://github.com/rnagumo/gqnlib/blob/master/gqnlib/slim_dataset.py
+"""
+
 """Convert slim tfrecords to pt.gz files.
 
 This file converts tfrecords in DeepMind slim dataset to gzip files. Each
@@ -19,18 +24,24 @@ meta_obj_rotations, meta_obj_colors)`.
 ref)
 https://github.com/deepmind/slim-dataset/blob/master/reader.py
 """
-
+from typing import List
 import argparse
 import logging
+import time
 import functools
 import gzip
 import multiprocessing as mp
 import os
 import pathlib
-import time
 import tensorflow as tf
 # import tensorflow.contrib.eager as tfe
+import stanza
 import torch
+from torch import Tensor
+from torch.nn.utils.rnn import pad_sequence
+import numpy as np
+
+from classes_helper import Vocabulary
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
@@ -38,6 +49,8 @@ _IMAGE_SCALE = 0.5
 _USE_SIMPLIFIED_CAPTIONS = False
 _PARSE_METADATA = True
 logging.getLogger('tensorflow').disabled = True
+nlp = stanza.Pipeline(lang='en', processors='tokenize', use_gpu=False)
+vocab = Vocabulary()
 
 
 def calculate_time(start_time, end_time):
@@ -50,52 +63,80 @@ def calculate_time(start_time, end_time):
 
 
 def convert_record(path: pathlib.Path, save_dir: pathlib.Path, batch_size: int,
-                   first_n: int) -> None:
+                   first_n: int, vocab_filepath: str) -> None:
     """Main process for one tfrecord file.
 
-    This method load one tfrecord file, and preprocess each (frames, cameras)
-    pair. The maximum number of pairs are bounded by `batch_size`.
+This method load one tfrecord file, and preprocess each (frames, cameras,
+captions). The maximum number of processed (frames, cameras,
+captions) are bounded by `batch_size`.
 
     Args:
-        path (pathlib.Path): Path to original data.
-        save_dir (pathlib.Path): Path to saved data.
-        batch_size (int): Batch size of dataset for each tfrecord.
-        first_n (int): Number of data to read (-1 means all).
+        path:           pathlib.Path
+                        Path to original data.
+        save_dir:       pathlib.Path
+                        Path to saved data.
+        batch_size:     int
+                        Batch size of dataset for each tfrecord.
+        first_n:        int
+                        Number of data to read (-1 means all).
+        vocab_filepath: str
+                        Path to vocab file.
     """
-
-    start_time = time.time()
+    # Load vocabulary file
+    if pathlib.Path(vocab_filepath).is_file():
+        vocab.read_json(vocab_filepath)
 
     # Load tfrecord
-    file_dir = "/".join(path.parts[-3:])
-    print(f"\n\n{file_dir: <40s} loading ...  ", end=" ")
     dataset = tf.data.TFRecordDataset(str(path))
-    print("loading finished\t", end=" ")
 
-    print("Processing data starts ...  ", end=" ")
     # Preprocess for each data
-    scene_list = []
+    images_list = []
+    views_list = []
+    captions_list = []
+    captions_text = []
+    # scene_list = []
     batch = 1
     for i, raw_data in enumerate(dataset.take(first_n)):
-        scene_list.append(preprocess_data(raw_data))
+        image, views, texts, captions = preprocess_data(raw_data)
+        images_list.append(image)
+        views_list.append(views)
+        captions_list.append(captions)
+        captions_text.append(texts)
 
         # Save batch to a gzip file
         if (i + 1) % batch_size == 0:
+            images = torch.squeeze(torch.stack(images_list))
+            views = torch.squeeze(torch.stack(views_list))
+            captions = torch.squeeze(
+                pad_sequence(captions_list).permute(1, 2, 0))
+            captions_text = np.squeeze(captions_text)
+            scene_list = [images, views, captions_text, captions]
+
             save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
             with gzip.open(str(save_path), "wb") as f:
                 torch.save(scene_list, f)
 
+            images_list = []
+            views_list = []
+            captions_list = []
+            captions_text = []
             scene_list = []
             batch += 1
     else:
         # Save rest
-        if scene_list:
+        if images_list:
+            images = torch.squeeze(torch.stack(images_list))
+            views = torch.squeeze(torch.stack(views_list))
+            captions = torch.squeeze(
+                pad_sequence(captions_list).permute(1, 2, 0))
+            captions_text = np.squeeze(captions_text)
+            scene_list = [images, views, captions_text, captions]
+
             save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
             with gzip.open(str(save_path), "wb") as f:
                 torch.save(scene_list, f)
 
-    end_time = time.time()
-    hr, mins, secs = calculate_time(start_time, end_time)
-    print(f"Process data finished. ET:{hr:2d}:{mins:2d}:{secs:2d}\n\n")
+    vocab.to_json(vocab_filepath)
 
 
 def preprocess_data(raw_data: tf.Tensor) -> tuple:
@@ -108,24 +149,24 @@ def preprocess_data(raw_data: tf.Tensor) -> tuple:
     tensor_dict = _parse_proto(raw_data)
 
     # Preprocess
-    frames = _preprocess_images(tensor_dict["images"])
-    cameras = _preprocess_cameras(tensor_dict["cameras"])
-    top_down = _preprocess_topdown(tensor_dict["top_down"])
-    captions = tensor_dict["captions"]
-    simple_captions = tensor_dict["simplified_captions"]
-    returned_values = [frames, cameras, top_down, captions, simple_captions]
+    frames = _preprocess_images(tensor_dict["images"]).numpy()
+    cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
+    captions = tensor_dict["captions"].numpy()
 
-    meta_keys = [
-        "meta_shape", "meta_color", "meta_size", "meta_obj_positions",
-        "meta_obj_rotations", "meta_obj_colors"
-    ]
-    meta_values = [tensor_dict[key] for key in meta_keys]
-    if _PARSE_METADATA:
-        returned_values += meta_values
+    # select the image to be regenerated by DRAW and its viewpoint
+    # Frames size: (10, 64, 64, 3) ==change==> (10, 64, 64, 3)
+    # cameras size: (10, 4).
+    frames = frames.transpose(0, 3, 1, 2)
 
-    # Convert tensor to numpy
-    returned_tuple = tuple(v.numpy() for v in returned_values)
-    return returned_tuple
+    # select captions and thier viewpoints of the others images
+    captions_ = build_vocab(captions)
+    captions_ = pad_sequence(captions_, batch_first=False)
+
+    # returned_values = [frames, cameras, top_down, captions, simple_captions]
+    frames = torch.from_numpy(frames)
+    cameras = torch.from_numpy(cameras)
+    returned_values = (frames, cameras, captions, captions_)
+    return returned_values
 
 
 def _parse_proto(buf: tf.Tensor) -> dict:
@@ -169,27 +210,27 @@ def _parse_proto(buf: tf.Tensor) -> dict:
     feature_map = {
         "frames":
         tf.io.FixedLenFeature(shape=[_NUM_VIEWS], dtype=tf.string),
-        "top_down_frame":
-        tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
+        # "top_down_frame":
+        # tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
         "cameras":
         tf.io.FixedLenFeature(shape=[_NUM_VIEWS * _NUM_RAW_CAMERA_PARAMS],
                               dtype=tf.float32),
         "captions":
         tf.io.VarLenFeature(dtype=tf.string),
-        "simplified_captions":
-        tf.io.VarLenFeature(dtype=tf.string),
-        "meta_shape":
-        tf.io.VarLenFeature(dtype=tf.string),
-        "meta_color":
-        tf.io.VarLenFeature(dtype=tf.string),
-        "meta_size":
-        tf.io.VarLenFeature(dtype=tf.string),
-        "meta_obj_positions":
-        tf.io.VarLenFeature(dtype=tf.float32),
-        "meta_obj_rotations":
-        tf.io.VarLenFeature(dtype=tf.float32),
-        "meta_obj_colors":
-        tf.io.VarLenFeature(dtype=tf.float32),
+        # "simplified_captions":
+        # tf.io.VarLenFeature(dtype=tf.string),
+        # "meta_shape":
+        # tf.io.VarLenFeature(dtype=tf.string),
+        # "meta_color":
+        # tf.io.VarLenFeature(dtype=tf.string),
+        # "meta_size":
+        # tf.io.VarLenFeature(dtype=tf.string),
+        # "meta_obj_positions":
+        # tf.io.VarLenFeature(dtype=tf.float32),
+        # "meta_obj_rotations":
+        # tf.io.VarLenFeature(dtype=tf.float32),
+        # "meta_obj_colors":
+        # tf.io.VarLenFeature(dtype=tf.float32),
     }
 
     example = tf.io.parse_single_example(buf, feature_map)
@@ -199,41 +240,41 @@ def _parse_proto(buf: tf.Tensor) -> dict:
         tf.map_fn(tf.image.decode_jpeg,
                   tf.reshape(images, [-1]),
                   dtype=tf.uint8))
-    top_down = tf.image.decode_jpeg(tf.squeeze(example["top_down_frame"]))
+    # top_down = tf.image.decode_jpeg(tf.squeeze(example["top_down_frame"]))
     cameras = tf.reshape(example["cameras"],
                          shape=[-1, _NUM_RAW_CAMERA_PARAMS])
     captions = tf.sparse.to_dense(example["captions"], default_value="")
-    simplified_captions = tf.sparse.to_dense(example["simplified_captions"],
-                                             default_value="")
-    meta_shape = tf.sparse.to_dense(example["meta_shape"], default_value="")
-    meta_color = tf.sparse.to_dense(example["meta_color"], default_value="")
-    meta_size = tf.sparse.to_dense(example["meta_size"], default_value="")
-    meta_obj_positions = tf.sparse.to_dense(example["meta_obj_positions"],
-                                            default_value=0)
-    meta_obj_positions = tf.reshape(meta_obj_positions, shape=[-1, 3])
-    meta_obj_rotations = tf.sparse.to_dense(example["meta_obj_rotations"],
-                                            default_value=0)
-    meta_obj_rotations = tf.reshape(meta_obj_rotations, shape=[-1, 4])
-    meta_obj_colors = tf.sparse.to_dense(example["meta_obj_colors"],
-                                         default_value=0)
-    meta_obj_colors = tf.reshape(meta_obj_colors, shape=[-1, 4])
+    # simplified_captions = tf.sparse.to_dense(example["simplified_captions"],
+    #                                          default_value="")
+    # meta_shape = tf.sparse.to_dense(example["meta_shape"], default_value="")
+    # meta_color = tf.sparse.to_dense(example["meta_color"], default_value="")
+    # meta_size = tf.sparse.to_dense(example["meta_size"], default_value="")
+    # meta_obj_positions = tf.sparse.to_dense(example["meta_obj_positions"],
+    #                                         default_value=0)
+    # meta_obj_positions = tf.reshape(meta_obj_positions, shape=[-1, 3])
+    # meta_obj_rotations = tf.sparse.to_dense(example["meta_obj_rotations"],
+    #                                         default_value=0)
+    # meta_obj_rotations = tf.reshape(meta_obj_rotations, shape=[-1, 4])
+    # meta_obj_colors = tf.sparse.to_dense(example["meta_obj_colors"],
+    #                                      default_value=0)
+    # meta_obj_colors = tf.reshape(meta_obj_colors, shape=[-1, 4])
 
     data_tensors = {
         "images": images,
         "cameras": cameras,
         "captions": captions,
-        "simplified_captions": simplified_captions,
-        "top_down": top_down
+        # "simplified_captions": simplified_captions,
+        # "top_down": top_down
     }
-    if _PARSE_METADATA:
-        data_tensors.update({
-            "meta_shape": meta_shape,
-            "meta_color": meta_color,
-            "meta_size": meta_size,
-            "meta_obj_positions": meta_obj_positions,
-            "meta_obj_rotations": meta_obj_rotations,
-            "meta_obj_colors": meta_obj_colors
-        })
+    # if _PARSE_METADATA:
+    #     data_tensors.update({
+    #         "meta_shape": meta_shape,
+    #         "meta_color": meta_color,
+    #         "meta_size": meta_size,
+    #         "meta_obj_positions": meta_obj_positions,
+    #         "meta_obj_rotations": meta_obj_rotations,
+    #         "meta_obj_colors": meta_obj_colors
+    #     })
 
     return data_tensors
 
@@ -273,6 +314,20 @@ def _preprocess_cameras(raw_cameras: tf.Tensor) -> tf.Tensor:
     return cameras
 
 
+def build_vocab(captions: np.ndarray) -> List[Tensor]:
+    """tokinize captions text then create vocabulary dict"""
+    sents = []
+    for caption in captions:
+        doc = nlp(caption.decode())  # caption tokinization
+        word_ids = []
+        for sentence in doc.sentences:
+            for word in sentence.words:
+                word_ids.append(vocab.token2index(word.text))
+        sents.append(torch.tensor(word_ids, device=torch.device("cpu")))
+
+    return sents
+
+
 def main():
     # Specify dataset name
     parser = argparse.ArgumentParser(description="Convert tfrecord to torch")
@@ -290,6 +345,10 @@ def main():
                         type=str,
                         default="train",
                         help="Mode {train, test, valid}")
+
+    parser.add_argument("--vocab_path",
+                        type=str,
+                        help="Path to the vocabulary json file")
 
     parser.add_argument("--batch-size",
                         type=int,
@@ -319,20 +378,26 @@ def main():
 
     # File list of original dataset
     record_list = sorted(tf_dir.glob("*.tfrecord"))
+
     # Multi process
+    vocab_filepath = os.path.expanduser(args.vocab_path)
     num_proc = mp.cpu_count()
+
+    start_time = time.time()
     with mp.Pool(processes=num_proc) as pool:
         f = functools.partial(convert_record,
                               save_dir=torch_dir,
                               batch_size=args.batch_size,
-                              first_n=args.first_n)
+                              first_n=args.first_n,
+                              vocab_filepath=vocab_filepath)
         pool.map(f, record_list)
 
-    # for file_ in record_list:
-    #     convert_record(file_,
-    #                    save_dir=torch_dir,
-    #                    batch_size=args.batch_size,
-    #                    first_n=args.first_n)
+    end_time = time.time()
+    hr, mins, secs = calculate_time(start_time, end_time)
+    print("\n\n")
+    print("=" * 100)
+    print(f"\n\nProcess data finished. ET:{hr:2d}:{mins:2d}:{secs:2d}\n\n")
+    print("----" * 20)
 
 
 if __name__ == "__main__":
