@@ -1,0 +1,8 @@
+https://huggingface.co/bert-base-uncased/resolve/main/.gitattributes
+https://huggingface.co/bert-base-uncased/resolve/main/config.json
+https://huggingface.co/bert-base-uncased/resolve/main/pytorch_model.bin
+https://huggingface.co/bert-base-uncased/resolve/main/rust_model.ot
+https://huggingface.co/bert-base-uncased/resolve/main/tf_model.h5
+https://huggingface.co/bert-base-uncased/resolve/main/tokenizer.json
+https://huggingface.co/bert-base-uncased/resolve/main/tokenizer_config.json
+https://huggingface.co/bert-base-uncased/resolve/main/vocab.txt

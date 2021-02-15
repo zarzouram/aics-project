@@ -1,13 +1,10 @@
 import pathlib
 import gzip
 
-from typing import List
-
 import numpy as np
 import torch
-from torch import Tensor
 
-from dataset.classes_helper import Vocabulary
+from dataset.classes_helper import BertPreprocessing
 
 
 class SlimDataset(torch.utils.data.Dataset):
@@ -25,20 +22,19 @@ class SlimDataset(torch.utils.data.Dataset):
     """
     def __init__(
         self,
-        roots_dir: List[str],
-        vocab_path: str,
+        root_dir: str,
+        bert_model_path: str,
+        save_tokens_path: str,
         minibatch_size: int,
         train: bool,
     ) -> None:
         super().__init__()
 
-        self.vocab = Vocabulary()
-        self.vocab.read_json(vocab_path)
+        self.tokenizer = BertPreprocessing(model_path=bert_model_path,
+                                           train=train)
+        self.__np2str = np.vectorize(lambda x: str(x))
 
-        files = []
-        for root_dir in roots_dir:
-            files.extend(pathlib.Path(root_dir).expanduser().glob("*.pt.gz"))
-
+        files = pathlib.Path(root_dir).expanduser().glob("*.pt.gz")
         self.record_list = sorted(files)
         self.train = train
         self.minibatch_size = minibatch_size
@@ -55,8 +51,7 @@ class SlimDataset(torch.utils.data.Dataset):
 
         return len(self.record_list)
 
-    def __getitem__(self,
-                    index: int) -> list:
+    def __getitem__(self, index: int) -> list:
         """Loads data file and returns data with specified index.
         This method reads `<index>.pt.gz` file which includes a list of tuples
         `(images, viewpoints, topdown, captions, *)`, and returns list of
@@ -85,7 +80,8 @@ class SlimDataset(torch.utils.data.Dataset):
         # views size: Tensor(B, N, 4)
         # texts size: List(B, np.array(N, l))
         # captions size: Tensor(B, N, SEQ)
-        image, views, texts, captions = dataset
+        # image, views, texts, captions = dataset
+        image, views, texts = dataset
 
         # Select rendom image and its viepoint
         # random selected images: (B, 3, 64, 64)
@@ -107,9 +103,17 @@ class SlimDataset(torch.utils.data.Dataset):
         idx2 = idx2[idx2 != idx_r[:, None]]
         idx1 = np.repeat(np.arange(B), N - 1)
         views_other = views[idx1, idx2, :].view(B, N - 1, -1)  # (B, 9, 4)
+
         # (B, 9, SEQ)
-        captions_other = captions[idx1, idx2, :].view(B, N - 1, -1)
+        # captions_other = captions[idx1, idx2, :].view(B, N - 1, -1)
         texts_other = texts[idx1, idx2].reshape([B, N - 1])  # (B, 9, l)
+        tests_other_list = self.__np2str(
+            texts_other.reshape(-1)).tolist()  # (b*9)
+        # bert preprocessing
+        tokens_data = self.tokenizer.tokenize(tests_other_list)
+        tokens_id = tokens_data["input_ids"].view(B, N - 1, -1)
+        tokens_type_id = tokens_data["token_type_ids"].view(B, N - 1, -1)
+        attention_mask = tokens_data["attention_mask"].view(B, N - 1, -1)
 
         # Mini batch
         if self.train:
@@ -119,17 +123,20 @@ class SlimDataset(torch.utils.data.Dataset):
             # Generate indices to select random samples out of B
             # a uniform random sample from (0 to B) of size B'
             idx_r = np.random.choice(B, actual_B, replace=False)  # (B')
+
             imgr = imgr[idx_r, :]  # (B', 3, 64, 64)
             views_imgr = views_imgr[idx_r, :]  # (B', 4)
             views_other = views_other[idx_r, :]  # (B', 9, 4)
-            captions_other = captions_other[idx_r, :]  # (B', 9, SEQ)
-            texts_other = texts_other[idx_r, :]  # (B', 9, l)
+            # captions_other = captions_other[idx_r, :]  # (B', 9, SEQ)
+            tokens_id = tokens_id[idx_r, :]  # (B', 9, SEQ)
+            tokens_type_id = tokens_type_id[idx_r, :]  # (B', 9, SEQ)
+            attention_mask = attention_mask[idx_r, :]  # (B', 9, SEQ)
 
             _, *i_dims = imgr.size()
             _, *vi_dims = views_imgr.size()
             _, *vo_dims = views_other.size()
-            _, *c_dims = captions_other.size()
-            ct_dims = texts_other.shape[-1]
+            # _, *c_dims = captions_other.size()
+            _, *td_dims = tokens_id.size()
 
             # Resize: break dim=0 B' into dim0=number of mini batches , dim1=mB
             imgr = imgr.contiguous().view(minibatch_num, self.minibatch_size,
@@ -140,22 +147,39 @@ class SlimDataset(torch.utils.data.Dataset):
             views_other = views_other.contiguous().view(
                 minibatch_num, self.minibatch_size, *vo_dims)
 
-            captions_other = captions_other.contiguous().view(
-                minibatch_num, self.minibatch_size, *c_dims)
+            # captions_other = captions_other.contiguous().view(
+            #     minibatch_num, self.minibatch_size, *c_dims)
 
-            texts_other = texts_other.reshape(
-                [minibatch_num, self.minibatch_size, ct_dims]).tolist()
+            tokens_id = tokens_id.contiguous().view(minibatch_num,
+                                                    self.minibatch_size,
+                                                    *td_dims)
+            tokens_type_id = tokens_type_id.contiguous().view(
+                minibatch_num, self.minibatch_size, *td_dims)
+            attention_mask = attention_mask.contiguous().view(
+                minibatch_num, self.minibatch_size, *td_dims)
 
             data_list = []
             for i in range(minibatch_num):
                 data_list.append([
-                    imgr[i], views_imgr[i], views_other[i], captions_other[i],
-                    texts_other[i]
+                    # imgr[i], views_imgr[i], views_other[i],
+                    # captions_other[i],
+                    imgr[i],
+                    views_imgr[i],
+                    views_other[i],
+                    tokens_id[i],
+                    tokens_type_id[i],
+                    attention_mask[i],
                 ])
 
         else:
             data_list = [
-                imgr, views_imgr, views_other, captions_other, texts_other
+                # imgr, views_imgr, views_other, captions_other, texts_other
+                imgr,
+                views_imgr,
+                views_other,
+                tokens_id,
+                tokens_type_id,
+                attention_mask,
             ]
 
         return data_list
