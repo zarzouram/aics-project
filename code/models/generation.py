@@ -8,7 +8,7 @@ https://github.com/Natsu6767/Generating-Devanagari-Using-DRAW/blob/master/draw_m
 import torch
 from torch import Tensor
 from torch import nn
-from torch.distributions.bernoulli import Bernoulli
+import torch.distributions as Dist
 """
 The equation numbers on the comments corresponding
 to the relevant equation given in the paper:
@@ -120,14 +120,10 @@ class DRAW(nn.Module):
                              self.B * self.A * self.channel,
                              requires_grad=True,
                              device=self.device)
-        x_const = torch.zeros(self.batch_size,
-                              self.B * self.A * self.channel,
-                              requires_grad=True,
-                              device=self.device)
+        kLz = 0
         for t in range(self.T):
             # Equation 3.
-            # x_hat = x - torch.sigmoid(c_prev)
-            x_hat = x - x_const
+            x_hat = x - torch.sigmoid(c_prev)
 
             # Equation 4.
             # Get the N x N glimpse.
@@ -144,13 +140,12 @@ class DRAW(nn.Module):
                                             (h_dec_prev, dec_state))
             # Equation 8.
             self.cs[t] = c_prev + self.write(h_dec)
-            self.x_reconst[t] = Bernoulli(logits=self.cs[t]).sample().to(
-                self.device)
 
             h_enc_prev = h_enc
             h_dec_prev = h_dec
-            c_prev = self.cs[t - 1]
-            x_const = self.x_reconst[t - 1]
+            c_prev = self.cs[t - 1 if t > 0 else t]
+
+        return kLz
 
     def read(self, x, x_hat, h_dec_prev):
         # Using attention
@@ -266,28 +261,17 @@ class DRAW(nn.Module):
 
     def loss(self, x: Tensor, cond: Tensor):
         self.forward(x, cond)
+        # Kullback-Leibler divergence of latent prior distribution-Equation 10
+        p_prior = Dist.Normal(torch.tensor(0., device=self.device),
+                              torch.tensor(1., device=self.device))
+        q_z = Dist.Normal(torch.stack(self.mus, dim=-1),
+                          torch.stack(self.sigmas, dim=-1))
+        lz = Dist.kl.kl_divergence(q_z, p_prior).sum(dim=[-2, -1]).mean(0)
 
-        criterion = nn.BCELoss()
-        x_recon = self.x_reconst[-1]
-        # Reconstruction loss.
-        # Only want to average across the mini-batch, hence, multiply by the
-        # image dimensions.
-        Lx = criterion(x_recon, x) * self.A * self.B * self.channel
-        # Latent loss.
-        Lz = 0
+        # Reconstruction loss - Equation 10
+        x_recon = Dist.Bernoulli(logits=self.cs[-1])
+        lx = - x_recon.log_prob(x).sum(-1).mean(0)
 
-        for t in range(self.T):
-            mu_2 = self.mus[t] * self.mus[t]
-            sigma_2 = self.sigmas[t] * self.sigmas[t]
-            logsigma = self.logsigmas[t]
+        draw_net_loss = lz + lx
 
-            kl_loss = 0.5 * torch.sum(mu_2 + sigma_2 - 2 * logsigma,
-                                      1) - 0.5 * self.T
-            Lz += kl_loss
-
-        Lz = torch.mean(Lz)
-        draw_net_loss = Lx + Lz
-
-        img_recon = x_recon.view(-1, self.channel, self.B, self.A)
-
-        return draw_net_loss, img_recon
+        return draw_net_loss

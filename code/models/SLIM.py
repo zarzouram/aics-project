@@ -1,3 +1,5 @@
+from typing import List
+
 import torch
 from torch import nn
 from torch import Tensor
@@ -52,7 +54,7 @@ class SLIM(nn.Module):
             cond_size=scene_rep_size + views_emb_size,
         )
 
-    def forward(self, batch: Tensor):
+    def forward(self, batch: List[Tensor]) -> Tensor:
 
         # Sizes:
         # ------
@@ -85,8 +87,7 @@ class SLIM(nn.Module):
             viewpoints=views_other.view(-1, views_size),
             n=scene_input_num)
 
-        loss, img_rexn = self.gen_model.loss(x=img.view(B, -1),
-                                             cond=torch.cat((r, view_imgr),
-                                                            dim=1))
+        loss = self.gen_model.loss(x=img.view(B, -1),
+                                   cond=torch.cat((r, view_imgr), dim=1))
 
-        return loss, img_rexn
+        return loss

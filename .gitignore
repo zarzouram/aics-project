@@ -403,3 +403,4 @@ data/bert_data/based_uncased/rust_model.ot
 data/bert_data/based_uncased/tf_model.h5
 data/bert_data/based_uncased/config.json
 data/bert_data/based_uncased/.gitattributes
+data/models/slim.pt

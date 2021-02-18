@@ -46,8 +46,8 @@ gsutil -m cp -c -L manifest.log -r \
 
 ## 3. Dataset Conversion
 
-Dataset files are in `tfrecord` fromat. TFRecord file format is binary storage
-format optimized use with Tensorflow. As I will use pyTorch, the dataset files
+Dataset files are in `tfrecord` fromat. TFRecord file format is a binary storage
+format which are optimized to be used with Tensorflow. As I will use pyTorch, the dataset files
 are converted to `pt.gz` format. To convert the dataset, when you are under
 `data` directory, use the following command:
 
@@ -55,8 +55,13 @@ are converted to `pt.gz` format. To convert the dataset, when you are under
 ./convert_slim_dataset.sh <absolute_path/to/dataset_folder>
 ```
 
-Note that the conversion process takes a lot of time. After conversion, dataset
-directory will be as shown below. Code is based on [this](https://github.com/rnagumo/gqnlib/blob/master/examples/convert_slim_dataset.py) and [this](https://github.com/rnagumo/gqnlib/blob/master/bin/download_slim.sh),
+After conversion, dataset directory will be as shown below. Code is based on
+[this](https://github.com/rnagumo/gqnlib/blob/master/examples/convert_slim_dataset.py)
+and [this](https://github.com/rnagumo/gqnlib/blob/master/bin/download_slim.sh).
+Changes are made to reduce the code excution time. Mainly, the vocabulary
+building is the bottleneck in the original script. Vocabulary building will be
+done in the `DataLoader` side using bert model tokenizer. Also, some additional
+data are nor preprocessed as I will not use it in the project.
 
 ```none
 <DATASET_FOLDER>
