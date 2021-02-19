@@ -2,7 +2,7 @@
 import torch
 # from torch.nn import DataParallel
 from torch.utils.data import DataLoader
-
+# from torch import nn
 from helpers.gpu_cuda_helper import get_gpus_avail
 from dataset.dataset_batcher import SlimDataset
 from models.SLIM import SLIM
@@ -55,55 +55,40 @@ N = 2
 DRAW_ENC_SZ = 128
 DRAW_DEC_SZ = 128
 DRAW_Z_SZ = 64
-
 MINI_BATCH = 32
+
 SAMPLE_NUM = 3200
-CHECK_POINT = 25
+
 
 # %%
 # Select cuda device based on the free memory
 # Most of the time some cudas are busy but available
-torch.cuda.empty_cache()
+# torch.cuda.empty_cache()
 cuda_idx = get_gpus_avail()
 device = None
 if not cuda_idx:
     device = torch.device("cpu")
-elif len(cuda_idx) == 1:
+elif len(cuda_idx) >= 1:
     device = torch.device(f"cuda:{cuda_idx[0][0]}")
-    # device = torch.device("cpu")
+    # if len(cuda_idx) != 1:
+    #     cuda_idx = [i for i, _ in cuda_idx]
+    #     print(f"Parallel Mode, cuda ids are: {cuda_idx}")
 
-if device:
-    print(f"\ndevice selected: {device}")
-else:
-    # print(f"Parallel Mode, cuda ids are: {[i for i,_ in cuda_idx]}")
-    # device = torch.device("cpu")
-    device = torch.device(f"cuda:{cuda_idx[0][0]}")
-    print(f"\ndevice selected: {device}")
+# device = torch.device("cpu")
+print(f"\ndevice selected: {device}")
 
 # %%
 
-train_dataset = SlimDataset(root_dir=dataset_dir + "train",
-                            bert_model_path=bert_model_dir,
-                            save_tokens_path="",
-                            minibatch_size=MINI_BATCH,
-                            train=True)
+train_dataset = SlimDataset(root_dir=dataset_dir + "train")
 
-val_dataset = SlimDataset(root_dir=dataset_dir + "valid",
-                          bert_model_path=bert_model_dir,
-                          save_tokens_path="",
-                          minibatch_size=no_mini_batch,
-                          train=False)
+val_dataset = SlimDataset(root_dir=dataset_dir + "valid")
 
-test_dataset = SlimDataset(root_dir=dataset_dir + "test",
-                           bert_model_path=bert_model_dir,
-                           save_tokens_path="",
-                           minibatch_size=no_mini_batch,
-                           train=False)
+test_dataset = SlimDataset(root_dir=dataset_dir + "test")
 
 test_iter = DataLoader(test_dataset,
                        batch_size=file_batch,
                        shuffle=True,
-                       num_workers=0)
+                       num_workers=2)
 
 # %%
 model_parameters = {
@@ -123,13 +108,16 @@ model_parameters = {
 }
 
 model = SLIM(model_parameters)
+model.to(device)
+# if cuda_idx:
+#     model = nn.DataParallel(model, cuda_idx)
 
 # %%
 optimizer_config = {"decay_rate": decay_rate, "lr_init": lr_init}
 
 slim_train = Trainer(model,
                      device,
-                     check_point=CHECK_POINT,
+                     early_stop_int=500,
                      sample_num=SAMPLE_NUM,
                      opt_config=optimizer_config,
                      save_path=model_path,
@@ -137,8 +125,11 @@ slim_train = Trainer(model,
 
 # %%
 while slim_train.in_train:
-    slim_train.train_eval()
+    slim_train.train_eval(model)
 
 
 # %%
 print("Done")
+
+
+# %%

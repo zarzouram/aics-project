@@ -1,5 +1,7 @@
 from typing import List
 
+import gc
+
 import torch
 from torch import nn
 from torch import Tensor
@@ -89,5 +91,15 @@ class SLIM(nn.Module):
 
         loss = self.gen_model.loss(x=img.view(B, -1),
                                    cond=torch.cat((r, view_imgr), dim=1))
+
+        if device.type == "cuda":
+            del img
+            del view_imgr
+            del views_other
+            del tokens_id
+            del tokens_type_id
+            del attention_mask
+            torch.cuda.empty_cache()
+            gc.collect()
 
         return loss

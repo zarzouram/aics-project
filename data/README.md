@@ -27,8 +27,6 @@ the respective files under them. The dataset directory should be as shown below.
 
 ```bash
 gsutil -m cp -c -L manifest.log -r \
-  "gs://slim-dataset/synthetic_data/test" \
-  "gs://slim-dataset/synthetic_data/valid" \
   "gs://slim-dataset/turk_data/" \
   ./<DATASET_FOLDER>/
 ```
@@ -80,8 +78,6 @@ data are nor preprocessed as I will not use it in the project.
     ├── train
     └── valid
 ```
-
-120 minute
 
 
 ## References

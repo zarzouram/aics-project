@@ -18,7 +18,12 @@ class BertPreprocessing:
         n_words:    int
                     Number of words.
     """
-    def __init__(self, model_path: str, train: bool, init_files_dir="") -> None:
+    def __init__(
+        self,
+        model_path: str,
+        init_files_dir="",
+        train: bool = True,
+    ) -> None:
         model_path = plib.Path(model_path).expanduser()
         self.__tokenizer = AutoTokenizer.from_pretrained(model_path,
                                                          do_lower_case=False)
