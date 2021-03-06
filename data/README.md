@@ -34,8 +34,6 @@ gsutil -m cp -c -L manifest.log -r \
 ```none
 <DATASET_FOLDER>
 └── synthetic_data
-    │   ├── test
-    │   └── valid
     └── turk_data
         ├── test
         ├── train
@@ -64,15 +62,10 @@ data are nor preprocessed as I will not use it in the project.
 ```none
 <DATASET_FOLDER>
 ├── synthetic_data
-│   │   ├── test
-│   │   └── valid
 │   └── turk_data
 │       ├── test
 │       ├── train
 │       └── valid
-├── synthetic_data_torch
-│   ├── test
-│   └── valid
 └── turk_data_torch
     ├── test
     ├── train
