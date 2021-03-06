@@ -1,12 +1,18 @@
 # %%
+from tqdm import tqdm
 import torch
-# from torch.nn import DataParallel
 from torch.utils.data import DataLoader
-# from torch import nn
-from helpers.gpu_cuda_helper import get_gpus_avail
+from torch import optim
+from torch.optim.lr_scheduler import LambdaLR
+
+import flair
+
 from dataset.dataset_batcher import SlimDataset
 from models.SLIM import SLIM
+
+from dataset.preprocessing import get_mini_batch
 from helpers.train_helper import Trainer
+from helpers.early_stopping import EarlyStopping
 
 # %% [markdown]
 # ## Notes:
@@ -55,15 +61,19 @@ N = 2
 DRAW_ENC_SZ = 128
 DRAW_DEC_SZ = 128
 DRAW_Z_SZ = 64
-MINI_BATCH = 32
 
+MINI_BATCH_SZ = 32
 SAMPLE_NUM = 3200
-
+EPOCH_STEP = int(SAMPLE_NUM / MINI_BATCH_SZ)
+CHECK_POINT = EPOCH_STEP * 5
 
 # %%
 # Select cuda device based on the free memory
 # Most of the time some cudas are busy but available
 # torch.cuda.empty_cache()
+
+from utils.gpu_cuda_helper import get_gpus_avail
+
 cuda_idx = get_gpus_avail()
 device = None
 if not cuda_idx:
@@ -74,10 +84,22 @@ elif len(cuda_idx) >= 1:
     #     cuda_idx = [i for i, _ in cuda_idx]
     #     print(f"Parallel Mode, cuda ids are: {cuda_idx}")
 
-# device = torch.device("cpu")
+device = torch.device("cuda:2")
 print(f"\ndevice selected: {device}")
+flair.device = device
 
 # %%
+from utils.visualization import Visualizations
+
+# Visualization
+vis = Visualizations()
+
+# %%
+
+
+def custom_collate(data):
+    return data
+
 
 train_dataset = SlimDataset(root_dir=dataset_dir + "train")
 
@@ -85,10 +107,25 @@ val_dataset = SlimDataset(root_dir=dataset_dir + "valid")
 
 test_dataset = SlimDataset(root_dir=dataset_dir + "test")
 
+train_iter = DataLoader(train_dataset,
+                        batch_size=1,
+                        shuffle=True,
+                        num_workers=4,
+                        pin_memory=device.type == "cuda",
+                        collate_fn=custom_collate)
+
+val_iter = DataLoader(val_dataset,
+                      batch_size=1,
+                      shuffle=True,
+                      num_workers=2,
+                      pin_memory=device.type == "cuda",
+                      collate_fn=custom_collate)
+
 test_iter = DataLoader(test_dataset,
                        batch_size=file_batch,
                        shuffle=True,
-                       num_workers=2)
+                       num_workers=2,
+                       collate_fn=custom_collate)
 
 # %%
 model_parameters = {
@@ -108,28 +145,102 @@ model_parameters = {
 }
 
 model = SLIM(model_parameters)
-model.to(device)
+model = model.to(device)
 # if cuda_idx:
 #     model = nn.DataParallel(model, cuda_idx)
 
 # %%
-optimizer_config = {"decay_rate": decay_rate, "lr_init": lr_init}
 
+
+def lr_decay(global_step: int, lr_init: int = lr_init):
+    lr = -decay_rate * global_step + lr_init
+    return lr
+
+
+lr0 = lr_decay(0)
+optimizer = optim.Adam(model.parameters())
+scheduler = LambdaLR(optimizer, lr_lambda=lambda step: lr_decay(step) / lr0)
+
+# %%
+
+print()
 slim_train = Trainer(model,
                      device,
-                     early_stop_int=500,
-                     sample_num=SAMPLE_NUM,
-                     opt_config=optimizer_config,
+                     epoch_interval=EPOCH_STEP,
                      save_path=model_path,
-                     datasets=[train_dataset, val_dataset])
+                     check_model_size=False)
+
+# print(f"Model memory Size: {slim_train.model_memory_gb:.2f} GB")
+
+# %%
+# early stopping
+es = EarlyStopping(patience=3)
 
 # %%
 while slim_train.in_train:
-    slim_train.train_eval(model)
+    slim_train.local_steps = 0  # 1 epoch = SAMPLE_NUM local steps
+    slim_train.train_loss = 0
 
+    # train
+    with tqdm(train_iter, leave=False, unit="file") as train_pb:
+        # load one file (max 64 samples per file)
+        for train_batch in train_pb:
+            # progress bar one step
+            train_pb.set_description(f"SamplesTrain {slim_train.local_steps}")
+
+            trn_mini_b = get_mini_batch(data=train_batch[0],
+                                        size_=MINI_BATCH_SZ)
+
+            with tqdm(trn_mini_b, leave=False, unit="minibatch") as minipb:
+                minipb.set_description("minibatch train")
+
+                # train min batches
+                for data in minipb:
+                    slim_train.train(model, optimizer, scheduler, data)
+
+                    # update progress bars
+                    minipb.set_postfix({"train/loss": slim_train.train_loss})
+                    slim_train.postfix["train/loss"] = slim_train.val_loss
+                    slim_train.trainpb.set_postfix(slim_train.postfix)
+
+                    # eval, each CHECK_POINT steps (5 epochs)
+                    if slim_train.global_steps % (CHECK_POINT - 1) == 0:
+                        model_tested = True
+                        slim_train.val_loss = 0
+                        slim_train.val_steps = 0
+                        for val_batch in val_iter:
+                            val_mini_batches = get_mini_batch(
+                                data=val_batch[0], size_=MINI_BATCH_SZ)
+                            slim_train.eval(model, val_mini_batches)
+
+                        slim_train.val_loss = \
+                            slim_train.val_loss / slim_train.val_steps
+
+                        # update main progress bar
+                        slim_train.postfix["test/loss"] = slim_train.val_loss
+                        slim_train.trainpb.set_postfix(slim_train.postfix)
+
+                        # save model
+                        if slim_train.val_loss > slim_train.best_loss:
+                            slim_train.best_loss = slim_train.val_loss
+                            slim_train.save_checkpoint(model)
+
+                        # early stopping
+                        if es.step(slim_train.val_loss):
+                            slim_train.train_loss = \
+                                slim_train.train_loss / slim_train.local_steps
+                            slim_train.in_train = False
+
+                    # plot
+                    if slim_train.global_steps % 3 == 0:
+                        vis.plot_loss(slim_train.train_loss,
+                                      slim_train.global_steps + 1, "Train")
+                        if model_tested:
+                            vis.plot_loss(slim_train.val_loss,
+                                          slim_train.global_steps + 1,
+                                          "Validation")
+
+                    model_tested = False
 
 # %%
 print("Done")
-
-
-# %%

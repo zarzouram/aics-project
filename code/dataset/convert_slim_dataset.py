@@ -40,8 +40,9 @@ import torch
 # from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 
-from classes_helper import BertPreprocessing
-# from classes_helper import Vocabulary
+import flair
+from flair.data import Sentence
+flair.device = torch.device("cpu")
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
@@ -101,37 +102,21 @@ captions) are bounded by `batch_size`.
     # Preprocess for each data
     images_list = []
     views_list = []
-    # captions_list = []
     captions_text = []
-    # scene_list = []
     batch = 1
     for i, raw_data in enumerate(dataset.take(first_n)):
         # image, views, texts, captions = preprocess_data(raw_data)
         image, views, texts = preprocess_data(raw_data)
         images_list.append(image)
         views_list.append(views)
-        # captions_list.append(captions)
-        captions_text.extend(texts)
+        captions_text.append(texts)
 
         # Save batch to a gzip file
         if (i + 1) % batch_size == 0:
             images = torch.squeeze(torch.stack(images_list))
             views = torch.squeeze(torch.stack(views_list))
-            # captions = torch.squeeze(
-            #     pad_sequence(captions_list).permute(1, 2, 0))
-            captions_text = np.squeeze(captions_text)
-            captions_text_ = np_to_list_str(captions_text)
-            tokens_data = tokenizer.tokenize(captions_text_)
-            tokens_id = tokens_data["input_ids"].view(batch_size, 10, -1)
-            tokens_type_id = tokens_data["token_type_ids"].view(
-                batch_size, 10, -1)
-            attention_mask = tokens_data["attention_mask"].view(
-                batch_size, 10, -1)
 
-            scene_list = [
-                images, views, captions_text_, tokens_id, tokens_type_id,
-                attention_mask
-            ]
+            scene_list = [images, views, captions_text]
 
             save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
             with gzip.open(str(save_path), "wb") as f:
@@ -139,7 +124,6 @@ captions) are bounded by `batch_size`.
 
             images_list = []
             views_list = []
-            # captions_list = []
             captions_text = []
             scene_list = []
             batch += 1
@@ -148,25 +132,13 @@ captions) are bounded by `batch_size`.
         if images_list:
             images = torch.squeeze(torch.stack(images_list))
             views = torch.squeeze(torch.stack(views_list))
-            # captions = torch.squeeze(
-            #     pad_sequence(captions_list).permute(1, 2, 0))
-            captions_text = np.squeeze(captions_text)
-            captions_text_ = np_to_list_str(captions_text)
-            tokens_data = tokenizer.tokenize(captions_text_)
-            mysize = images.size(0)
-            tokens_id = tokens_data["input_ids"].view(mysize, 10, -1)
-            tokens_type_id = tokens_data["token_type_ids"].view(mysize, 10, -1)
-            attention_mask = tokens_data["attention_mask"].view(mysize, 10, -1)
+            # captions_text = np.squeeze(captions_text)
 
-            scene_list = [
-                images, views, captions_text_, tokens_id, tokens_type_id,
-                attention_mask
-            ]
+            scene_list = [images, views, captions_text]
 
-            if mysize >= 32:
-                save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
-                with gzip.open(str(save_path), "wb") as f:
-                    torch.save(scene_list, f)
+            save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
+            with gzip.open(str(save_path), "wb") as f:
+                torch.save(scene_list, f)
 
     # vocab.to_json(vocab_filepath)
 
@@ -185,18 +157,19 @@ def preprocess_data(raw_data: tf.Tensor) -> tuple:
     cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
     captions = tensor_dict["captions"].numpy()
 
+    all_caption = []
+    for caption in captions:
+        all_caption.append(Sentence(str(caption.decode()).lower()))
+
     # Frames size: (10, 64, 64, 3) ==change==> (10, 64, 64, 3)
     # cameras size: (10, 4).
     frames = frames.transpose(0, 3, 1, 2)
-
-    # captions_ = build_vocab(captions)
-    # captions_ = pad_sequence(captions_, batch_first=False)
 
     # returned_values = [frames, cameras, top_down, captions, simple_captions]
     frames = torch.from_numpy(frames)
     cameras = torch.from_numpy(cameras)
     # returned_values = (frames, cameras, captions, captions_)
-    returned_values = (frames, cameras, captions)
+    returned_values = (frames, cameras, all_caption)
     return returned_values
 
 
@@ -396,10 +369,6 @@ def main():
                         help="Read only first n data in single a record "
                         "(-1 means all data).")
     args = parser.parse_args()
-
-    # initialte tokenizer
-    global tokenizer
-    tokenizer = BertPreprocessing(model_path=args.bert_dir)
 
     # Path
     # root = pathlib.Path().absolute()
