@@ -32,6 +32,7 @@ class Trainer():
         self.val_steps = 0
 
         # number of samples to train every (epoch)
+        self.epoch_finished = False
         self.epoch = 0
         self.epoch_intv = epoch_interval
 
@@ -67,19 +68,23 @@ class Trainer():
 
         # End of epoch: Reach number of samples
         if (self.global_steps + 1) % self.epoch_intv == 0:
+            self.global_steps += 1
             self.epoch += 1
-            self.train_loss = self.train_loss / self.local_steps
+            self.epoch_finished = True
+            # self.train_loss = self.train_loss / self.local_steps
             return
 
         # Reach the end of train loop
         if self.global_steps == (self.end - 1):
+            self.global_steps += 1
             self.in_train = False
-            self.train_loss = self.train_loss / self.local_steps
+            # self.train_loss = self.train_loss / self.local_steps
 
         self.global_steps += 1
 
         # update progress bars
-        self.trainpb.set_description(f"Global Step {self.global_steps}")
+        self.trainpb.set_description(
+            f"Global Step {self.global_steps} - epoch: {self.epoch}")
         self.trainpb.update(1)
 
         # torch.cuda.empty_cache()

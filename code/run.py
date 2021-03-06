@@ -186,7 +186,7 @@ while slim_train.in_train:
         # load one file (max 64 samples per file)
         for train_batch in train_pb:
             # progress bar one step
-            train_pb.set_description(f"SamplesTrain {slim_train.local_steps}")
+            train_pb.set_description(f"LocalStep {slim_train.local_steps}")
 
             trn_mini_b = get_mini_batch(data=train_batch[0],
                                         size_=MINI_BATCH_SZ)
@@ -203,7 +203,7 @@ while slim_train.in_train:
                     slim_train.postfix["train/loss"] = slim_train.train_loss
                     slim_train.trainpb.set_postfix(slim_train.postfix)
 
-                    # eval, each CHECK_POINT steps (5 epochs)
+                    # eval, each CHECK_POINT steps (every 5 epochs)
                     if slim_train.global_steps % (CHECK_POINT - 1) == 0:
                         model_tested = True
                         slim_train.val_loss = 0
@@ -241,6 +241,13 @@ while slim_train.in_train:
                                           "Validation")
 
                     model_tested = False
+
+                    if slim_train.epoch_finished or not slim_train.in_train:
+                        break
+
+            if slim_train.epoch_finished or not slim_train.in_train:
+                slim_train.epoch_finished = False
+                break
 
 # %%
 print("Done")
