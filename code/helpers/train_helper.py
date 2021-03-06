@@ -61,9 +61,9 @@ class Trainer():
         optimizer.step()
         scheduler.step()
 
-        self.train_loss += loss.item()
+        self.train_loss = loss.item()
         self.local_steps += 1
-        self.train_loss = self.train_loss / self.local_steps
+        # self.train_loss = self.train_loss / self.local_steps
 
         # End of epoch: Reach number of samples
         if (self.global_steps + 1) % self.epoch_intv == 0:

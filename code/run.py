@@ -200,7 +200,7 @@ while slim_train.in_train:
 
                     # update progress bars
                     minipb.set_postfix({"train/loss": slim_train.train_loss})
-                    slim_train.postfix["train/loss"] = slim_train.val_loss
+                    slim_train.postfix["train/loss"] = slim_train.train_loss
                     slim_train.trainpb.set_postfix(slim_train.postfix)
 
                     # eval, each CHECK_POINT steps (5 epochs)
