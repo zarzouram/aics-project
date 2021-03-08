@@ -22,5 +22,5 @@ class Visualizations:
                 ylabel='Loss',
                 title='Loss (mean per 10 steps)',
                 # showlegend=True,
-                # legend=["Train", "Validation"]
+                legend=["Train", "Validation"]
             ))
