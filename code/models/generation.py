@@ -120,7 +120,7 @@ class DRAW(nn.Module):
                              self.B * self.A * self.channel,
                              requires_grad=True,
                              device=self.device)
-        kLz = 0
+
         for t in range(self.T):
             # Equation 3.
             x_hat = x - torch.sigmoid(c_prev)
@@ -145,7 +145,7 @@ class DRAW(nn.Module):
             h_dec_prev = h_dec
             c_prev = self.cs[t - 1 if t > 0 else t]
 
-        return kLz
+        return z
 
     def read(self, x, x_hat, h_dec_prev):
         # Using attention
@@ -262,15 +262,20 @@ class DRAW(nn.Module):
     def loss(self, x: Tensor, cond: Tensor):
         self.forward(x, cond)
         # Kullback-Leibler divergence of latent prior distribution-Equation 10
-        p_prior = Dist.Normal(torch.tensor(0., device=self.device),
-                              torch.tensor(1., device=self.device))
-        q_z = Dist.Normal(torch.stack(self.mus, dim=-1),
-                          torch.stack(self.sigmas, dim=-1))
+        zero = torch.zeros_like(torch.stack(self.mus))
+        one = torch.ones_like(torch.stack(self.sigmas))
+        p_prior = Dist.Normal(zero, one)
+        q_z = Dist.Normal(torch.stack(self.mus), torch.stack(self.sigmas))
         lz = Dist.kl.kl_divergence(q_z, p_prior).sum(dim=[-2, -1]).mean(0)
 
         # Reconstruction loss - Equation 10
-        x_recon = Dist.Bernoulli(logits=self.cs[-1])
-        lx = - x_recon.log_prob(x).sum(-1).mean(0)
+        batch_size = x.size(0)
+        img_size = [self.B, self.A]
+        x_prime = self.cs[-1].view(batch_size, -1, *img_size)
+        x_ = x.view(batch_size, -1, *img_size)
+
+        x_recon = Dist.Bernoulli(logits=x_prime)
+        lx = -x_recon.log_prob(x_).sum(dim=[1, 2, 3]).mean(0)
 
         draw_net_loss = lz + lx
 

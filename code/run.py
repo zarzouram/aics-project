@@ -3,7 +3,6 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 from torch import optim
-from torch.optim.lr_scheduler import LambdaLR
 
 import flair
 
@@ -13,6 +12,7 @@ from models.SLIM import SLIM
 from dataset.preprocessing import get_mini_batch
 from helpers.train_helper import Trainer
 from helpers.early_stopping import EarlyStopping
+from helpers.scheduler import LinearDecayLR
 
 # %% [markdown]
 # ## Notes:
@@ -50,8 +50,8 @@ image_height = 64
 image_color = 3
 
 lr_init = 5e-4
-lr_min = 5e-5
-decay_rate = (lr_init - lr_min) / 1e6
+lr_final = 5e-5
+step_num = 1.5e4
 
 CAPTION_ENC_SZ = 64
 VIEWS_ENC_SZ = 32
@@ -151,15 +151,8 @@ model = model.to(device)
 
 # %%
 
-
-def lr_decay(global_step: int, lr_init: int = lr_init):
-    lr = -decay_rate * global_step + lr_init
-    return lr
-
-
-lr0 = lr_decay(0)
-optimizer = optim.Adam(model.parameters())
-scheduler = LambdaLR(optimizer, lr_lambda=lambda step: lr_decay(step) / lr0)
+optimizer = optim.Adam(model.parameters(), lr=lr_init)
+scheduler = LinearDecayLR(optimizer, lr_i=lr_i, lr_f=lr_f, s_n=step_num)
 
 # %%
 
@@ -223,7 +216,8 @@ while slim_train.in_train:
                         # save model
                         if slim_train.val_loss > slim_train.best_loss:
                             slim_train.best_loss = slim_train.val_loss
-                            slim_train.save_checkpoint(model)
+                            slim_train.save_checkpoint(model, optimizer,
+                                                       scheduler)
 
                         # early stopping
                         if es.step(slim_train.val_loss):

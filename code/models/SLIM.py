@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch import Tensor
 
-from layers.text_encoding import TransormerEmbedding
+from layers.text_encoding import TextEncoding
 from models.representation import RepresentationNetwork
 from models.generation import DRAW
 
@@ -23,6 +23,7 @@ class SLIM(nn.Module):
         views_emb_size = param["views_emb_size"]
         views_enc_size = param["views_enc_size"]
         scene_rep_size = param["scene_rep_size"]
+        caption_embs_size = param["caption_embs_size"]
 
         image_width = param["image_width"]
         image_height = param["image_height"]
@@ -35,9 +36,10 @@ class SLIM(nn.Module):
 
         self.model_param = nn.Parameter(torch.empty(0))
 
-        self.embd = TransormerEmbedding()
+        self.embd = TextEncoding(hidden_size=caption_embs_size,
+                                 lstm_num_layers=1,
+                                 lstm_bdir=True)
 
-        caption_embs_size = self.embd.embeddings.embedding_length
         self.rep_model = RepresentationNetwork(
             caption_embs_size=caption_embs_size,
             viewpoints_size=views_emb_size,
@@ -79,10 +81,9 @@ class SLIM(nn.Module):
         scene_input_num = views_other.size(-2)
 
         captions_emds = self.embd(captions)
-        r = self.rep_model(
-            cpt_embs=captions_emds,
-            viewpoints=views_other.view(-1, views_size),
-            n=scene_input_num)
+        r = self.rep_model(cpt_embs=captions_emds,
+                           viewpoints=views_other.view(-1, views_size),
+                           n=scene_input_num)
 
         loss = self.gen_model.loss(x=img.view(B, -1),
                                    cond=torch.cat((r, view_imgr), dim=1))

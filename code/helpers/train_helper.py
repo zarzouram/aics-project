@@ -44,7 +44,7 @@ class Trainer():
         self.save_path = save_path  # path to save best mpdel
 
         self.in_train = True
-        self.end = 2000000
+        self.end = 20000000
 
         # progress bar data
         self.trainpb = tqdm.tqdm(total=self.end, unit="GlobalStep")
@@ -108,10 +108,10 @@ class Trainer():
 
         return
 
-    def save_checkpoint(self, model):
+    def save_checkpoint(self, model, optimizer, scheduler):
         model_state = model.state_dict()
-        optimizer_state = self.optimizer.state_dict()
-        scheduler_state = self.scheduler.state_dict()
+        optimizer_state = optimizer.state_dict()
+        scheduler_state = scheduler.state_dict()
 
         state_dict = {
             "steps": self.global_steps,
