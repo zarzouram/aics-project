@@ -153,10 +153,14 @@ model = model.to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=lr_init)
 scheduler = LinearDecayLR(optimizer)
+<<<<<<< HEAD
 # scheduler = LinearDecayLR(optimizer,
 #                           lr_i=lr_init,
 #                           lr_f=lr_final,
 #                           s_n=step_num)
+=======
+# scheduler = LinearDecayLR(optimizer, lr_i=lr_i, lr_f=lr_f, s_n=step_num)
+>>>>>>> 0ea0289cf441fb7f1500157d9caf9a7139555c18
 
 # %%
 
