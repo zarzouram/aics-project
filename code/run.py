@@ -37,7 +37,6 @@ CUDA_LAUNCH_BLOCKING = 1
 
 # %%
 dataset_dir = "/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch/"
-bert_model_dir = "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/bert_data/based_uncased"  # noqa: E501
 model_path = "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/models/"
 
 # %%
@@ -62,7 +61,7 @@ DRAW_ENC_SZ = 128
 DRAW_DEC_SZ = 128
 DRAW_Z_SZ = 64
 
-MINI_BATCH_SZ = 32
+MINI_BATCH_SZ = 8
 SAMPLE_NUM = 3200
 EPOCH_STEP = int(SAMPLE_NUM / MINI_BATCH_SZ)
 CHECK_POINT = EPOCH_STEP * 5
@@ -84,7 +83,7 @@ elif len(cuda_idx) >= 1:
     #     cuda_idx = [i for i, _ in cuda_idx]
     #     print(f"Parallel Mode, cuda ids are: {cuda_idx}")
 
-device = torch.device("cuda:2")
+device = torch.device("cuda:1")
 print(f"\ndevice selected: {device}")
 flair.device = device
 
@@ -95,41 +94,37 @@ from utils.visualization import Visualizations
 vis = Visualizations()
 
 # %%
-
-
-def custom_collate(data):
-    return data
-
-
 train_dataset = SlimDataset(root_dir=dataset_dir + "train")
 
 val_dataset = SlimDataset(root_dir=dataset_dir + "valid")
 
 test_dataset = SlimDataset(root_dir=dataset_dir + "test")
 
-train_iter = DataLoader(train_dataset,
-                        batch_size=1,
-                        shuffle=True,
-                        num_workers=4,
-                        pin_memory=device.type == "cuda",
-                        collate_fn=custom_collate)
+train_iter = DataLoader(
+    train_dataset,
+    batch_size=1,
+    shuffle=True,
+    num_workers=4,
+    pin_memory=device.type == "cuda",
+)
 
-val_iter = DataLoader(val_dataset,
-                      batch_size=1,
-                      shuffle=True,
-                      num_workers=2,
-                      pin_memory=device.type == "cuda",
-                      collate_fn=custom_collate)
+val_iter = DataLoader(
+    val_dataset,
+    batch_size=1,
+    shuffle=True,
+    num_workers=2,
+    pin_memory=device.type == "cuda",
+)
 
-test_iter = DataLoader(test_dataset,
-                       batch_size=file_batch,
-                       shuffle=True,
-                       num_workers=2,
-                       collate_fn=custom_collate)
+test_iter = DataLoader(
+    test_dataset,
+    batch_size=file_batch,
+    shuffle=True,
+    num_workers=2,
+)
 
 # %%
 model_parameters = {
-    "bert_model_dir": bert_model_dir,
     "caption_embs_size": CAPTION_ENC_SZ,
     "views_emb_size": views_emb_size,
     "views_enc_size": VIEWS_ENC_SZ,
@@ -185,7 +180,7 @@ while slim_train.in_train:
             # progress bar one step
             train_pb.set_description(f"LocalStep {slim_train.local_steps}")
 
-            trn_mini_b = get_mini_batch(data=train_batch[0],
+            trn_mini_b = get_mini_batch(data=train_batch,
                                         size_=MINI_BATCH_SZ)
 
             with tqdm(trn_mini_b, leave=False, unit="minibatch") as minipb:
@@ -244,7 +239,8 @@ while slim_train.in_train:
 
             if slim_train.epoch_finished or not slim_train.in_train:
                 slim_train.epoch_finished = False
-                print("Training finished ...")
+                if not slim_train.in_train:
+                    print("\nTraining finished ...")
                 break
 
 # %%

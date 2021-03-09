@@ -12,8 +12,8 @@ def split_query_context(data: List[Tensor]) -> List[Tensor]:
     # Context captions data: (B, 10, SEQ) ==> (B, 9, SEQ)
     images = torch.squeeze(data[0])
     views = torch.squeeze(data[1])
-    text = np.array(data[2], dtype=object)
-    # text = text.reshape(views.size(0), views.size(1))
+    tokens_id = torch.squeeze(data[3])
+    attention_mask = torch.squeeze(data[4])
 
     B = images.size(0)
     N = images.size(1)
@@ -30,12 +30,16 @@ def split_query_context(data: List[Tensor]) -> List[Tensor]:
     idx1 = np.repeat(np.arange(B), N - 1)
     views_context = views_context[idx1, idx2, :].view(B, N - 1,
                                                       -1)  # (B, 9, 4)
-    text_context = text[idx1, idx2].reshape(B, N - 1)  # (B, 9)
+    tokens_id_context = tokens_id[idx1, idx2, :].view(B, N - 1, -1)
+    attention_mask_context = attention_mask[idx1, idx2, :].view(B, N - 1, -1)
 
     del images, views
     gc.collect()
 
-    return [image_query, view_query, views_context, text_context]
+    return [
+        image_query, view_query, views_context, tokens_id_context,
+        attention_mask_context
+    ]
 
 
 def get_mini_batch(data: List[Tensor], size_: int = 0) -> List:
@@ -46,7 +50,8 @@ def get_mini_batch(data: List[Tensor], size_: int = 0) -> List:
     image_query = data_splitted[0]
     view_query = data_splitted[1]
     views_context = data_splitted[2]
-    text_context = data_splitted[3]
+    tokens_id_context = data_splitted[3]
+    attention_mask_context = data_splitted[4]
 
     if size_ > 0:
         # size B' = (mB * number of mini batches) < B
@@ -60,11 +65,13 @@ def get_mini_batch(data: List[Tensor], size_: int = 0) -> List:
         image_query = image_query[idx_r, :]  # (B', 3, 64, 64)
         view_query = view_query[idx_r, :]  # (B', 4)
         views_context = views_context[idx_r, :]  # (B', 9, 4)
-        text_context = text_context[idx_r, :]
+        tokens_id_context = tokens_id_context[idx_r, :]
+        attention_mask_context = attention_mask_context[idx_r, :]
 
         _, *i_dims = image_query.size()
         _, vi_dims = view_query.size()
         _, *vo_dims = views_context.size()
+        _, *td_dims = tokens_id_context.size()
 
         # Resize: break dim=0 B' into dim0=number of mini batches , dim1=mB
         image_query = image_query.contiguous().view(batch_num, size_, *i_dims)
@@ -74,15 +81,22 @@ def get_mini_batch(data: List[Tensor], size_: int = 0) -> List:
         views_context = views_context.contiguous().view(
             batch_num, size_, *vo_dims)
 
-        text_context = text_context.reshape(batch_num, -1)
+        tokens_id_context = tokens_id_context.contiguous().view(
+            batch_num, size_, *td_dims)
+
+        attention_mask_context = attention_mask_context.contiguous().view(
+            batch_num, size_, *td_dims)
 
         data_list = []
         for i in range(batch_num):
             data_list.append([
                 image_query[i], view_query[i], views_context[i],
-                text_context[i]
+                tokens_id_context[i], attention_mask_context[i]
             ])
         return data_list
 
     else:
-        return [image_query, view_query, views_context, text_context]
+        return [
+            image_query, view_query, views_context, tokens_id_context,
+            attention_mask_context
+        ]

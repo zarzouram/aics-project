@@ -36,9 +36,7 @@ class SLIM(nn.Module):
 
         self.model_param = nn.Parameter(torch.empty(0))
 
-        self.embd = TextEncoding(hidden_size=caption_embs_size,
-                                 lstm_num_layers=1,
-                                 lstm_bdir=True)
+        self.embd = TextEncoding(hidden_size=caption_embs_size)
 
         self.rep_model = RepresentationNetwork(
             caption_embs_size=caption_embs_size,
@@ -74,13 +72,15 @@ class SLIM(nn.Module):
         img = torch.squeeze(batch[0]).to(device)  # (B, 3, 64, 64)
         view_imgr = torch.squeeze(batch[1]).to(device)  # (B, 1)
         views_other = torch.squeeze(batch[2]).to(device)  # (B, N, 9)
-        captions = batch[3].tolist()  # (B*N, 9)
+        tokens_id_context = torch.squeeze(batch[3]).to(device)
+        attention_mask_context = torch.squeeze(batch[4]).to(device)
 
         B = img.size(0)
         views_size = views_other.size(-1)
         scene_input_num = views_other.size(-2)
 
-        captions_emds = self.embd(captions)
+        captions_emds = self.embd(input_ids=tokens_id_context,
+                                  attention_mask=attention_mask_context)
         r = self.rep_model(cpt_embs=captions_emds,
                            viewpoints=views_other.view(-1, views_size),
                            n=scene_input_num)
