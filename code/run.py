@@ -38,7 +38,7 @@ CUDA_LAUNCH_BLOCKING = 1
 # %%
 dataset_dir = "/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch/"
 bert_model_dir = "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/bert_data/based_uncased"  # noqa: E501
-model_path = "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/models/slim.pt"
+model_path = "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/models/"
 
 # %%
 file_batch = 1

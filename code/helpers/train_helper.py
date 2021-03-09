@@ -1,4 +1,5 @@
 import tqdm
+from datetime import datetime
 
 import torch
 
@@ -113,6 +114,9 @@ class Trainer():
         optimizer_state = optimizer.state_dict()
         scheduler_state = scheduler.state_dict()
 
+        time_tag = str(datetime.now().strftime("%d-%m-%Hh%M"))
+        modelname = f"slim_{time_tag}_{self.global_steps}.pt"
+        save_path = f"{self.save_path}{modelname}"
         state_dict = {
             "steps": self.global_steps,
             "loss": self.best_loss,
@@ -121,4 +125,4 @@ class Trainer():
             "scheduler_state_dict": scheduler_state
         }
 
-        torch.save(state_dict, self.save_path)
+        torch.save(state_dict, save_path)
