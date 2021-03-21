@@ -1,12 +1,21 @@
 # Project for the AICS course (MLT LT2318)
 
-This is a repository contains a set file structure for submitting your project in this course.
+## Implementation of "Encoding Spatial Relations from Natural Language"
 
-See `library/github-instructions.md` for a description how to use this repository.
+### Introduction
 
-Use this file to keep general notes about your project, including your individual project plan. We will also use it for comments.
+text
 
+### Dataset
 
-## Notes
+Dataset information can be found [here](./data/README.md)
 
-  - 
+### Code
+
+text
+
+### Results
+
+text
+
+### Reference
