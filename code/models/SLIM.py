@@ -29,16 +29,13 @@ class SLIM(nn.Module):
         image_height = param["image_height"]
         image_color = param["image_color"]
         iter_num = param["iter_num"]
-        N = param["N"]
-        draw_encoder_size = param["draw_encoder_size"]
-        draw_decoder_size = param["draw_decoder_size"]
+        draw_h_size = param["draw_h_size"]
+
         z_size = param["z_size"]
 
         self.model_param = nn.Parameter(torch.empty(0))
 
-        self.embd = TextEncoding(hidden_size=caption_embs_size,
-                                 lstm_num_layers=1,
-                                 lstm_bdir=True)
+        self.embd = TextEncoding(hidden_size=caption_embs_size)
 
         self.rep_model = RepresentationNetwork(
             caption_embs_size=caption_embs_size,
@@ -51,10 +48,7 @@ class SLIM(nn.Module):
             img_h=image_height,
             img_c=image_color,
             iter_num=iter_num,
-            read_N=N,
-            write_N=N,
-            encoder_size=draw_encoder_size,
-            decoder_size=draw_decoder_size,
+            h_size=draw_h_size,
             z_size=z_size,
             cond_size=scene_rep_size + views_emb_size,
         )
@@ -71,12 +65,11 @@ class SLIM(nn.Module):
         # Viewpoints encoder output size: VE
         device = self.model_param.device
 
-        img = torch.squeeze(batch[0]).to(device)  # (B, 3, 64, 64)
-        view_imgr = torch.squeeze(batch[1]).to(device)  # (B, 1)
-        views_other = torch.squeeze(batch[2]).to(device)  # (B, N, 9)
+        img = batch[0].to(device)  # (B, 3, 64, 64)
+        view_imgr = batch[1].to(device)  # (B, 1)
+        views_other = batch[2].to(device)  # (B, N, 9)
         captions = batch[3].tolist()  # (B*N, 9)
 
-        B = img.size(0)
         views_size = views_other.size(-1)
         scene_input_num = views_other.size(-2)
 
@@ -85,8 +78,7 @@ class SLIM(nn.Module):
                            viewpoints=views_other.view(-1, views_size),
                            n=scene_input_num)
 
-        loss = self.gen_model.loss(x=img.view(B, -1),
-                                   cond=torch.cat((r, view_imgr), dim=1))
+        output = self.gen_model(x=img, cond=torch.cat((r, view_imgr), dim=1))
 
         if device.type == "cuda":
             del img
@@ -95,4 +87,26 @@ class SLIM(nn.Module):
             # torch.cuda.empty_cache()
             gc.collect()
 
-        return loss
+        return output
+
+    def generate(self, batch: List[Tensor]) -> Tensor:
+        device = self.model_param.device
+
+        img = batch[0].to(device)  # (B, 3, 64, 64)
+        view_imgr = batch[1].to(device)  # (B, 1)
+        views_other = batch[2].to(device)  # (B, N, 9)
+        captions = batch[3].tolist()  # (B*N, 9)
+
+        # B = img.size(0)
+        views_size = views_other.size(-1)
+        scene_input_num = views_other.size(-2)
+
+        captions_emds = self.embd(captions)
+        r = self.rep_model(cpt_embs=captions_emds,
+                           viewpoints=views_other.view(-1, views_size),
+                           n=scene_input_num)
+
+        image = self.gen_model.generate(x=img,
+                                        cond=torch.cat((r, view_imgr), dim=1))
+
+        return image

@@ -1,4 +1,5 @@
-import tqdm
+# import tqdm
+from tqdm import tqdm_notebook as tqdm
 from datetime import datetime
 
 import torch
@@ -31,6 +32,7 @@ class Trainer():
         self.global_steps = 0  # number of steps counter
         self.local_steps = 0
         self.val_steps = 0
+        self.total_norm = 0
 
         # number of samples to train every (epoch)
         self.epoch_finished = False
@@ -40,7 +42,7 @@ class Trainer():
         # losses
         self.train_loss = 0
         self.val_loss = 0
-        self.best_loss = -1  # best valid_tn loss calc_d every CHECK_POINT steps
+        self.best_loss = 1e6  # best valid_tn loss
 
         self.save_path = save_path  # path to save best mpdel
 
@@ -48,18 +50,32 @@ class Trainer():
         self.end = 20000000
 
         # progress bar data
-        self.trainpb = tqdm.tqdm(total=self.end, unit="GlobalStep")
-        self.postfix = {"train/loss": 0.0, "test/loss": 0.0}
+        self.trainpb = tqdm(total=self.end, unit="GlobalStep")
+        self.postfix = {"train loss": 0.0, "test loss": 0.0}
         self.trainpb.set_description(f"Global Step {self.global_steps}")
 
-    def train(self, model, optimizer, scheduler, batch):
+    def train(self, model, optimizer, scheduler, batch, check_grad=False):
         # train model
         model.train()
         optimizer.zero_grad()
         # forward
-        loss = model(batch)
+        _, loss = model(batch)
         # backward and update
         loss.backward()
+
+        self.total_norm = 0
+        if check_grad:
+            parameters = list(
+                filter(lambda p: p.grad is not None, model.parameters()))
+            counter = 0
+            for p in parameters:
+                param_norm = p.grad.data.norm(2)
+                self.total_norm += param_norm.item()**2
+                counter += 1
+            self.total_norm = self.total_norm**(1. / 2)
+            self.total_norm = self.total_norm / counter
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 4)
         optimizer.step()
         scheduler.step()
 
@@ -95,16 +111,16 @@ class Trainer():
     def eval(self, model, val_batch):
         # validate
         model.eval()
-        with tqdm.tqdm(val_batch, leave=False, unit="valbatch") as valpb:
+        with tqdm(val_batch, leave=False, unit="valbatch") as valpb:
             for val_mini_batch in valpb:
 
                 with torch.no_grad():
-                    loss = model(val_mini_batch)
+                    _, loss = model(val_mini_batch)
                     self.val_loss += loss.item()
 
                 self.val_steps += 1
                 # update progress bars
-                valpb.set_postfix({"test/loss": loss.item()})
+                valpb.set_postfix({"test loss": loss.item()})
                 valpb.update(1)
 
         return
