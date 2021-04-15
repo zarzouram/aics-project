@@ -1,7 +1,6 @@
 import pathlib
 import gzip
 
-import numpy as np
 import torch
 
 

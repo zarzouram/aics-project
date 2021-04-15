@@ -1,5 +1,5 @@
-# import tqdm
-from tqdm import tqdm_notebook as tqdm
+from tqdm import tqdm
+# from tqdm import tqdm_notebook as tqdm
 from datetime import datetime
 
 import torch
@@ -54,7 +54,7 @@ class Trainer():
         self.postfix = {"train loss": 0.0, "test loss": 0.0}
         self.trainpb.set_description(f"Global Step {self.global_steps}")
 
-    def train(self, model, optimizer, scheduler, batch, check_grad=False):
+    def step(self, model, optimizer, scheduler, batch, check_grad=False):
         # train model
         model.train()
         optimizer.zero_grad()
@@ -75,38 +75,12 @@ class Trainer():
             self.total_norm = self.total_norm**(1. / 2)
             self.total_norm = self.total_norm / counter
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 4)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
         optimizer.step()
         scheduler.step()
 
         self.train_loss = loss.item()
-        self.local_steps += 1
         # self.train_loss = self.train_loss / self.local_steps
-
-        # End of epoch: Reach number of samples
-        if (self.global_steps + 1) % self.epoch_intv == 0:
-            self.global_steps += 1
-            self.epoch += 1
-            self.epoch_finished = True
-            # self.train_loss = self.train_loss / self.local_steps
-            return
-
-        # Reach the end of train loop
-        if self.global_steps == (self.end - 1):
-            self.global_steps += 1
-            self.in_train = False
-            # self.train_loss = self.train_loss / self.local_steps
-
-        self.global_steps += 1
-
-        # update progress bars
-        self.trainpb.set_description(
-            f"Global Step {self.global_steps} - epoch: {self.epoch}")
-        self.trainpb.update(1)
-
-        # torch.cuda.empty_cache()
-
-        return
 
     def eval(self, model, val_batch):
         # validate
@@ -125,17 +99,21 @@ class Trainer():
 
         return
 
-    def save_checkpoint(self, model, optimizer, scheduler):
+    def save_checkpoint(self, model, optimizer, scheduler, best_model=True):
         model_state = model.state_dict()
         optimizer_state = optimizer.state_dict()
         scheduler_state = scheduler.state_dict()
 
         time_tag = str(datetime.now().strftime("%d-%m-%Hh%M"))
-        modelname = f"slim_{time_tag}_{self.global_steps}.pt"
+        if best_model:
+            modelname = f"slim_{time_tag}_{self.global_steps}.pt"
+        else:
+            modelname = "reg_save_slim.pt"
         save_path = f"{self.save_path}{modelname}"
         state_dict = {
             "steps": self.global_steps,
             "loss": self.best_loss,
+            "epoch": self.epoch,
             "model_state_dict": model_state,
             "optimizer_state_dict": optimizer_state,
             "scheduler_state_dict": scheduler_state

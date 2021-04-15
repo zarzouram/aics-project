@@ -55,9 +55,9 @@ After conversion, dataset directory will be as shown below. Code is based on
 [this](https://github.com/rnagumo/gqnlib/blob/master/examples/convert_slim_dataset.py)
 and [this](https://github.com/rnagumo/gqnlib/blob/master/bin/download_slim.sh).
 Changes are made to reduce the code excution time. Mainly, the vocabulary
-building is the bottleneck in the original script. Vocabulary building will be
-done in the `DataLoader` side using bert model tokenizer. Also, some additional
-data are nor preprocessed as I will not use it in the project.
+building is the bottleneck in the original script. As I am going to use Bert in
+this project, Bert tokenizer will be used and it is faster than building a
+dictionary of tokens.
 
 ```none
 <DATASET_FOLDER>

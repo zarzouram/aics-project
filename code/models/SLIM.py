@@ -84,7 +84,7 @@ class SLIM(nn.Module):
             del img
             del view_imgr
             del views_other
-            # torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
             gc.collect()
 
         return output

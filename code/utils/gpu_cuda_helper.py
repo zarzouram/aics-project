@@ -42,4 +42,5 @@ def get_gpus_avail():
         for idx, m in enumerate(memory_usage_percnt):
             print(f"{idx:^10}{m:^15.2%}")
 
-    return sorted(cuda_ids, key=lambda tup: tup[1]) if cuda_ids else cuda_ids
+    return sorted(cuda_ids, key=lambda tup:
+                  (tup[1], tup[0])) if cuda_ids else cuda_ids
