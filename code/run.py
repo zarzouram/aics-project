@@ -50,8 +50,6 @@ dataset_dir = "/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch_flair/"
 model_path = "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/models/"
 
 file_batch = 1
-no_mini_batch = 0
-bert_hidden_size = 768
 views_emb_size = 4
 image_width = 64
 image_height = 64
@@ -129,27 +127,9 @@ flair.device = device
 
 # %%
 from utils.visualization import Visualizations
-import json
-from pathlib import Path
 
-home = str(Path.home())
 # Visualization
 env_name = "Loss_Plot_1"
-if resume and change_saved_plot:
-    saved_step = int(model_name.split(".")[0].split("_")[-1])
-    with open(f"{home}/.visdom/{env_name}.json") as f:
-        data = json.load(f)
-    for i in [0, 1]:
-        x = data["jsons"][f"{env_name}_win"]["content"]["data"][i]["x"]
-        y = data["jsons"][f"{env_name}_win"]["content"]["data"][i]["y"]
-        idx = x.index(saved_step + 1) + 1
-        x = x[:idx]
-        y = y[:idx]
-        data["jsons"][f"{env_name}_win"]["content"]["data"][i]["x"] = x
-        data["jsons"][f"{env_name}_win"]["content"]["data"][i]["y"] = y
-
-    with open(f"{home}/.visdom/{env_name}.json", "w") as json_file:
-        json.dump(data, json_file)
 
 vis = Visualizations(env_name)
 

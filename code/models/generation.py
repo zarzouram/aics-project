@@ -4,12 +4,13 @@ Ref:
 https://github.com/wohlert/generative-query-network-pytorch/tree/32f32632462d6796ecbc749a6617d3f3c0571b80
 
 """
-import math
+# import math
 import torch
 # from torch import Tensor
 from torch import nn
 # import torch.nn.functional as F
-import torch.distributions as Dist
+from torch.distributions.normal import Normal
+from torch.distributions.bernoulli import Bernoulli
 
 from layers.conv_lstm_conv import ConvLSTMCell
 """
@@ -55,139 +56,129 @@ class DRAW(nn.Module):
         self.w = img_w
         self.x_dims = (img_w, img_h)
         self.c = img_c
+        self.scale = 8
 
         self.z_size = z_size
         self.h_size = h_size
+        self.e_size = h_size
         self.T = iter_num
 
         # Recurrent encoder/decoder models
-        self.encoder = ConvLSTMCell(img_w // 8,
-                                    2 * img_c,
-                                    h_size,
-                                    kernel_size=19,
-                                    stride=7,
-                                    padding=2)
+        kwargs_1 = dict(kernel_size=5, stride=1, padding=2)
+        self.encoder = ConvLSTMCell(img_w // self.scale,
+                                    2 * self.e_size + h_size * 2, h_size,
+                                    **kwargs_1)
 
-        self.decoder = ConvLSTMCell(img_w // 8,
-                                    z_size + img_c + cond_size,
-                                    h_size,
-                                    kernel_size=5,
-                                    stride=1,
-                                    padding=2)
+        self.decoder = ConvLSTMCell(img_w // self.scale,
+                                    z_size + h_size + cond_size, h_size,
+                                    **kwargs_1)
 
-        # image read and imnage write
-        self.write = nn.Conv2d(h_size,
-                               h_size // 2,
-                               kernel_size=1,
-                               stride=1,
-                               padding=0)
+        # read and write
+        scf = 4
+        kwargs_2 = dict(kernel_size=6, stride=2, padding=2)
+        self.write = nn.Sequential(
+            nn.ConvTranspose2d(h_size, h_size, kernel_size=1, stride=1),
+            nn.ReLU(), nn.PixelShuffle(scf), nn.ReLU(),
+            nn.ConvTranspose2d(int(h_size // scf**2), img_c, **kwargs_2))
 
         self.read = nn.Conv2d(img_c,
-                              img_c,
+                              h_size,
                               kernel_size=17,
                               stride=7,
                               padding=1)
 
-        self.transpose = nn.Sequential(
-            nn.ConvTranspose2d(h_size // 2,
-                               12,
-                               kernel_size=6,
-                               stride=4,
-                               padding=1),
+        # Outputs parameters of distributions
+        self.variational = nn.Conv2d(h_size, 2 * z_size, **kwargs_1)
+        self.prior = nn.Conv2d(h_size, 2 * z_size, **kwargs_1)
+
+        # downsampling x, and r
+        self.img_downsampling = nn.Sequential(
+            nn.Conv2d(img_c, 32, kernel_size=2, stride=2),
             nn.ReLU(),
-            nn.ConvTranspose2d(12, img_c, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(32, 64, kernel_size=2, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=2, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(128, self.e_size, kernel_size=1, stride=1),
+            nn.ReLU(),
         )
 
-        # Outputs parameters of distributions
-        self.variational = nn.Conv2d(h_size,
-                                     2 * z_size,
-                                     kernel_size=5,
-                                     stride=1,
-                                     padding=2)
+        self.epsilon_downsampling = nn.Conv2d(img_c,
+                                              self.e_size,
+                                              kernel_size=17,
+                                              stride=7,
+                                              padding=1)
 
-        self.prior = nn.Conv2d(h_size,
-                               2 * z_size,
-                               kernel_size=5,
-                               stride=1,
-                               padding=2)
-
-        # self.loss = nn.MSELoss(reduction="none")
+        self.loss = nn.MSELoss(reduction="none")
 
     def forward(self, x, cond):
         batch_size = x.size(0)
         device = self.model_param.device
+
         # Hidden states initialization
+        shape = (self.h // self.scale, self.w // self.scale)
         (h_enc, c_enc) = self.encoder.init_hidden(batch_size=batch_size,
                                                   hidden=self.h_size,
-                                                  shape=self.x_dims)
+                                                  shape=shape)
 
         (h_dec, c_dec) = self.decoder.init_hidden(batch_size=batch_size,
                                                   hidden=self.h_size,
-                                                  shape=self.x_dims)
+                                                  shape=shape)
 
-        canvas = x.new_zeros((batch_size, self.c, self.h, self.w),
-                             device=device)
+        r = x.new_zeros((batch_size, self.c, self.h, self.w), device=device)
 
+        x_r = self.img_downsampling(x)
         kl = 0
         for _ in range(self.T):
             # Reconstruction error
-            epsilon = x - canvas  # (B, 3, 64, 64)
+            epsilon = x - r  # (B, 3, 64, 64)
+            epsilon_r = self.epsilon_downsampling(epsilon)
 
             # Infer posterior density from hidden state (W//8)
             # (B, 128, 8, 8)
-            h_enc, c_enc = self.encoder(torch.cat([x, epsilon], dim=1), h_enc,
-                                        c_enc)
-
-            # Prior distribution
-            # (B, 3, 8, 8): z channel = 3
-            p_mu, p_log_std = torch.split(self.prior(h_dec),
-                                          self.z_size,
-                                          dim=1)
-            p_std = torch.exp(p_log_std)
-            p_prior = Dist.Normal(p_mu, p_std)
+            h_enc, c_enc = self.encoder(
+                torch.cat([x_r, epsilon_r, h_dec, h_enc], dim=1), h_enc, c_enc)
 
             # Posterior distribution
             # (B, 3, 8, 8): z channel = 3
-            q_mu, q_log_std = torch.split(self.variational(h_enc),
+            q_mu, q_log_var = torch.split(self.variational(h_enc),
                                           self.z_size,
                                           dim=1)
-            q_std = torch.exp(q_log_std)
-            q_posterior = Dist.Normal(q_mu, q_std)
+            q_std = torch.exp(q_log_var / 2)
+            q_posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
             # (B, 3, 8, 8)
-            # z = q_mu + (0.5 * q_log_std).exp() * torch.randn_like(q_log_std)
-            # reparameterization trick, same as above
             z = q_posterior.rsample()
 
             # (B, 3, 64, 64) ==> (B, 3, 8, 8)
-            canvas_next = self.read(canvas)
+            r_next = self.read(r)
 
             # Send representation through decoder
             # (B, 128, 8, 8)
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
-            h_dec, c_dec = self.decoder(
-                torch.cat([z, canvas_next, cond_], dim=1), h_dec, c_dec)
+            h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
+                                        h_dec, c_dec)
 
             # write representation
-            u = self.write(h_dec)  # (B, 128, 8, 8) ==> (B, 128, 8, 8)
-            canvas = canvas + self.transpose(u)  # transpose ==> (B, 3, 64, 64)
+            r_ = self.write(h_dec)  # (B, 128, 8, 8) ==> (B, 3, 64, 64)
+            r = r + r_
 
-            kl += Dist.kl.kl_divergence(q_posterior, p_prior)
+            # KL divergence
+            prior = Normal(torch.zeros_like(q_mu), torch.ones_like(q_std))
+            log_qzx = q_posterior.log_prob(z)
+            log_pz = prior.log_prob(z)
+            kl += log_qzx - log_pz
 
         # Return the reconstruction and kl
-        # Gaussian negative log likelihood loss
-        # source: https://github.com/pytorch/pytorch/blob/
-        # 6cdabb2e40a46a49ace66f5d94ed9c48bf6c3372/torch/nn/functional.py#L2597
-        var = x.new_ones((1, ))
-        const = math.log(2 * math.pi)
-        loss_ = ((x - canvas)**2).view(batch_size, -1)
-        constxn_loss = 0.5 * ((torch.log(var) + loss_ / var).sum(dim=1) + const)
+        x_dist = Bernoulli(logits=r)  # p(x|z)
+        lx_loss = torch.sum(-x_dist.log_prob(x).view(batch_size, -1), dim=1)
         kl_loss = torch.sum(kl.view(batch_size, -1), dim=1)
-        loss = torch.mean(constxn_loss + kl_loss)
+        loss = torch.mean(lx_loss + kl_loss)
 
-        return canvas, loss
+        x_const = x_dist.probs
+        return (r, x_const), loss
 
     def generate(self, x, cond):
         """
@@ -202,28 +193,30 @@ class DRAW(nn.Module):
         c_dec = x.new_zeros(
             (batch_size, self.h_size, self.h // 8, self.w // 8))
 
-        canvas = x.new_zeros((batch_size, self.c, self.h, self.w))
+        r = x.new_zeros((batch_size, self.c, self.h, self.w))
 
         for _ in range(self.T):
-            # p_mu, p_log_std = torch.split(self.prior(h_dec),
-            #                               self.z_size,
-            #                               dim=1)
-            # p_std = torch.exp(p_log_std)
-            # z = Dist.Normal(p_mu, p_std).sample()
-            z = torch.randn(batch_size,
-                            self.z_size,
-                            self.h // 8,
-                            self.w // 8,
-                            device=x.device)
+            p_mu, q_log_var = torch.split(self.prior(h_dec),
+                                          self.z_size,
+                                          dim=1)
+            p_std = torch.exp(q_log_var / 2)
+            z = Normal(p_mu, p_std).sample()
+            # z = torch.randn(batch_size,
+            #                 self.z_size,
+            #                 self.h // 8,
+            #                 self.w // 8,
+            #                 device=x.device)
 
-            canvas_next = self.read(canvas)
+            r_next = self.read(r)
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
 
-            h_dec, c_dec = self.decoder(
-                torch.cat([z, canvas_next, cond_], dim=1), h_dec, c_dec)
+            h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
+                                        h_dec, c_dec)
 
-            # Refine representation
-            canvas = canvas + self.transpose(self.write(h_dec))
+            r_ = self.write(h_dec)
+            r = r + r_
 
-        return canvas
+        x_recon = Bernoulli(logits=r).probs
+
+        return r, x_recon

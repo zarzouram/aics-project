@@ -131,14 +131,14 @@ class ConvLSTMCell(nn.Module):
 
         h_0 = torch.zeros(batch_size,
                           hidden,
-                          shape[0] // 8,
-                          shape[1] // 8,
+                          shape[0],
+                          shape[1],
                           device=device)
 
         c_0 = torch.zeros(batch_size,
                           hidden,
-                          shape[0] // 8,
-                          shape[1] // 8,
+                          shape[0],
+                          shape[1],
                           device=device)
 
         return (Variable(h_0), Variable(c_0))

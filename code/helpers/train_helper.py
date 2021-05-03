@@ -17,6 +17,7 @@ class Trainer():
                  device,
                  epoch_interval: int,
                  save_path: str,
+                 total_steps_num: int = 2000000,
                  check_model_size: bool = False):
 
         if check_model_size:
@@ -41,17 +42,18 @@ class Trainer():
 
         # losses
         self.train_loss = 0
+        self.epoch_loss = 0
         self.val_loss = 0
         self.best_loss = 1e6  # best valid_tn loss
 
         self.save_path = save_path  # path to save best mpdel
 
         self.in_train = True
-        self.end = 20000000
+        self.end = total_steps_num
 
         # progress bar data
         self.trainpb = tqdm(total=self.end, unit="GlobalStep")
-        self.postfix = {"train loss": 0.0, "test loss": 0.0}
+        self.postfix = {"epoch loss": 0.0, "test loss": 0.0}
         self.trainpb.set_description(f"Global Step {self.global_steps}")
 
     def step(self, model, optimizer, scheduler, batch, check_grad=False):
@@ -80,7 +82,7 @@ class Trainer():
         scheduler.step()
 
         self.train_loss = loss.item()
-        # self.train_loss = self.train_loss / self.local_steps
+        self.epoch_loss += self.train_loss
 
     def eval(self, model, val_batch):
         # validate

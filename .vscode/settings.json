@@ -1,4 +1,4 @@
 {
-    "python.pythonPath": "/bin/python3",
+    "python.pythonPath": "/home/guszarzmo@GU.GU.SE/.virtualenvs/aicproject/bin/python",
     "jupyter.jupyterServerType": "local"
 }

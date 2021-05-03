@@ -92,9 +92,6 @@ captions) are bounded by `batch_size`.
         vocab_filepath: str
                         Path to vocab file.
     """
-    # Load vocabulary file
-    # if pathlib.Path(vocab_filepath).is_file():
-    #     vocab.read_json(vocab_filepath)
 
     # Load tfrecord
     dataset = tf.data.TFRecordDataset(str(path))
@@ -318,20 +315,6 @@ def _preprocess_cameras(raw_cameras: tf.Tensor) -> tf.Tensor:
     return cameras
 
 
-# def build_vocab(captions: np.ndarray) -> List[Tensor]:
-#     """tokinize captions text then create vocabulary dict"""
-#     sents = []
-#     for caption in captions:
-#         doc = nlp(caption.decode())  # caption tokinization
-#         word_ids = []
-#         for sentence in doc.sentences:
-#             for word in sentence.words:
-#                 word_ids.append(vocab.token2index(word.text))
-#         sents.append(torch.tensor(word_ids, device=torch.device("cpu")))
-
-#     return sents
-
-
 def main():
     # Specify dataset name
     parser = argparse.ArgumentParser(description="Convert tfrecord to torch")
@@ -371,8 +354,6 @@ def main():
     args = parser.parse_args()
 
     # Path
-    # root = pathlib.Path().absolute()
-    # root = pathlib.Path(os.getenv("DATA_DIR", "./data/"))
     dataset_path = os.path.expanduser(args.dataset_path)
     tf_dir = pathlib.Path(f"{dataset_path}/{args.dataset}/{args.mode}/")
     dataset_parent_path = pathlib.Path(f"{dataset_path}").parent

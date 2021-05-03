@@ -19,9 +19,9 @@ class Visualizations:
             name=name,
             update='append' if self.loss_win else None,
             opts=dict(
-                xlabel='Step',
+                xlabel='Epoch',
                 ylabel='Loss',
-                title='Training and Validation Loss',
+                title='Training and Validation Loss mean every 100 step',
                 # showlegend=True,
                 legend=["Train", "Validation"]
             ))

@@ -1,0 +1,39 @@
+{
+    "train_dataloader": {
+        "file_batch": 1,
+        "num_workers": 4
+    },
+    "val_dataloader": {
+        "file_batch": 1,
+        "num_workers": 4
+    },
+    "test_dataloader": {
+        "file_batch": 1,
+        "num_workers": 4
+    },
+    "checkpoints_dir": "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/models/",
+    "model_hyperparameter": {
+        "caption_embs_size": 64,
+        "views_emb_size": 4,
+        "views_enc_size": 32,
+        "scene_rep_size": 256,
+        "image_width": 64,
+        "image_height": 64,
+        "image_color": 3,
+        "iter_num": 12,
+        "draw_h_size": 128,
+        "z_size": 3
+    },
+    "scheduler_parm": {
+        "lr_init": 5e-4,
+        "lr_final": 5e-5,
+        "step_num": 1e6
+    },
+    "train_param": {
+        "mini_batch_size": 32,
+        "samples_num": 3200,
+        "checkpoint_interv": 5
+    },
+    "early_stop_patience": 3,
+    "total_steps_num": 2000000
+}
