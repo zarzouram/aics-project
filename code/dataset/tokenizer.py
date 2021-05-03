@@ -1,8 +1,7 @@
 from typing import List, Dict
-import pathlib as plib
 
 from torch import Tensor
-from transformers import AutoTokenizer
+from transformers import DistilBertTokenizerFast
 
 
 class BertPreprocessing:
@@ -18,26 +17,14 @@ class BertPreprocessing:
         n_words:    int
                     Number of words.
     """
-    def __init__(
-        self,
-        model_path: str,
-        init_files_dir="",
-        train: bool = True,
-    ) -> None:
-        model_path = plib.Path(model_path).expanduser()
-        self.__tokenizer = AutoTokenizer.from_pretrained(model_path,
-                                                         do_lower_case=False)
-        self.train = train
-
-        if init_files_dir and train:
-            json_files = plib.Path(init_files_dir).expanduser().glob("*.json")
-            text_files = plib.Path(init_files_dir).expanduser().glob("*.text")
-            if len(json_files) > 1 and len(text_files) > 1:
-                self.load_status(load_dir=init_files_dir)
+    def __init__(self, ) -> None:
+        self.__tokenizer = DistilBertTokenizerFast.from_pretrained(
+            'distilbert-base-uncased')
 
     def tokenize(self, sentences: List[str]) -> Dict[str, Tensor]:
         encoded_inputs = self.__tokenizer(sentences,
                                           padding='longest',
+                                          return_token_type_ids=False,
                                           return_tensors="pt")
         return encoded_inputs
 

@@ -23,7 +23,7 @@ meta_obj_rotations, meta_obj_colors)`.
 ref)
 https://github.com/deepmind/slim-dataset/blob/master/reader.py
 """
-# from typing import List
+from typing import List
 import argparse
 import logging
 import time
@@ -33,16 +33,11 @@ import multiprocessing as mp
 import os
 import pathlib
 import tensorflow as tf
-# import tensorflow.contrib.eager as tfe
-# import stanza
-import torch
-# from torch import Tensor
-# from torch.nn.utils.rnn import pad_sequence
-import numpy as np
 
-import flair
-from flair.data import Sentence
-flair.device = torch.device("cpu")
+import torch
+
+import numpy as np
+from dataset.tokenizer import BertPreprocessing
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
@@ -50,8 +45,6 @@ _IMAGE_SCALE = 0.5
 _USE_SIMPLIFIED_CAPTIONS = False
 _PARSE_METADATA = True
 logging.getLogger('tensorflow').disabled = True
-# nlp = stanza.Pipeline(lang='en', processors='tokenize', use_gpu=False)
-# vocab = Vocabulary()
 
 
 def calculate_time(start_time, end_time):
@@ -73,12 +66,12 @@ def np_to_list_str(str_byte_array):
 
 
 def convert_record(path: pathlib.Path, save_dir: pathlib.Path, batch_size: int,
-                   first_n: int, vocab_filepath: str) -> None:
+                   first_n: int) -> None:
     """Main process for one tfrecord file.
 
-This method load one tfrecord file, and preprocess each (frames, cameras,
-captions). The maximum number of processed (frames, cameras,
-captions) are bounded by `batch_size`.
+    This method load one tfrecord file, and preprocess each (frames, cameras,
+    captions). The maximum number of processed (frames, cameras,
+    captions) are bounded by `batch_size`.
 
     Args:
         path:           pathlib.Path
@@ -89,8 +82,6 @@ captions) are bounded by `batch_size`.
                         Batch size of dataset for each tfrecord.
         first_n:        int
                         Number of data to read (-1 means all).
-        vocab_filepath: str
-                        Path to vocab file.
     """
 
     # Load tfrecord
@@ -113,7 +104,16 @@ captions) are bounded by `batch_size`.
             images = torch.squeeze(torch.stack(images_list))
             views = torch.squeeze(torch.stack(views_list))
 
-            scene_list = [images, views, captions_text]
+            captions_text = np.squeeze(captions_text)
+            captions_text_ = np_to_list_str(captions_text)  # type: List[str]
+            tokens_data = tokenizer.tokenize(captions_text_)
+            tokens_id = tokens_data["input_ids"].view(batch_size, 10, -1)
+            attention_mask = tokens_data["attention_mask"].view(
+                batch_size, 10, -1)
+
+            scene_list = [
+                images, views, captions_text_, tokens_id, attention_mask
+            ]
 
             save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
             with gzip.open(str(save_path), "wb") as f:
@@ -131,13 +131,20 @@ captions) are bounded by `batch_size`.
             views = torch.squeeze(torch.stack(views_list))
             # captions_text = np.squeeze(captions_text)
 
-            scene_list = [images, views, captions_text]
+            captions_text = np.squeeze(captions_text)
+            captions_text_ = np_to_list_str(captions_text)  # type: List[str]
+            tokens_data = tokenizer.tokenize(captions_text_)
+            mysize = images.size(0)
+            tokens_id = tokens_data["input_ids"].view(mysize, 10, -1)
+            attention_mask = tokens_data["attention_mask"].view(mysize, 10, -1)
+
+            scene_list = [
+                images, views, captions_text_, tokens_id, attention_mask
+            ]
 
             save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
             with gzip.open(str(save_path), "wb") as f:
                 torch.save(scene_list, f)
-
-    # vocab.to_json(vocab_filepath)
 
 
 def preprocess_data(raw_data: tf.Tensor) -> tuple:
@@ -154,19 +161,13 @@ def preprocess_data(raw_data: tf.Tensor) -> tuple:
     cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
     captions = tensor_dict["captions"].numpy()
 
-    all_caption = []
-    for caption in captions:
-        all_caption.append(Sentence(str(caption.decode()).lower()))
-
     # Frames size: (10, 64, 64, 3) ==change==> (10, 64, 64, 3)
     # cameras size: (10, 4).
     frames = frames.transpose(0, 3, 1, 2)
 
-    # returned_values = [frames, cameras, top_down, captions, simple_captions]
     frames = torch.from_numpy(frames)
     cameras = torch.from_numpy(cameras)
-    # returned_values = (frames, cameras, captions, captions_)
-    returned_values = (frames, cameras, all_caption)
+    returned_values = (frames, cameras, captions)
     return returned_values
 
 
@@ -368,8 +369,9 @@ def main():
     # File list of original dataset
     record_list = sorted(tf_dir.glob("*.tfrecord"))
 
-    # Multi process
-    vocab_filepath = os.path.expanduser(args.vocab_path)
+    global tokenizer
+    tokenizer = BertPreprocessing()
+
     num_proc = mp.cpu_count()
 
     start_time = time.time()
@@ -377,8 +379,7 @@ def main():
         f = functools.partial(convert_record,
                               save_dir=torch_dir,
                               batch_size=args.batch_size,
-                              first_n=args.first_n,
-                              vocab_filepath=vocab_filepath)
+                              first_n=args.first_n)
         pool.map(f, record_list)
 
     end_time = time.time()
