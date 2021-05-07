@@ -11,8 +11,6 @@ from torch.utils.data import DataLoader
 from torch import optim
 import numpy as np
 
-import flair
-
 from dataset.dataset_batcher import SlimDataset
 from models.SLIM import SLIM
 from dataset.preprocessing import get_mini_batch
@@ -39,7 +37,7 @@ def parse_arguments():
     parser.add_argument(
         "--dataset_dir",
         type=str,
-        default="/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch_flair/",
+        default="/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch/",
         help="SLIM Dataset directory.")
 
     parser.add_argument(
@@ -105,10 +103,6 @@ def load_config_file(config_path: str) -> List[dict]:
     return configs
 
 
-def custom_collate(data):
-    return data
-
-
 def load_model(model_parameters: dict,
                device: torch.device,
                scheduler_param: dict,
@@ -119,7 +113,7 @@ def load_model(model_parameters: dict,
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr_init)
     scheduler = LinearDecayLR(optimizer)
-    model_state_dict = None
+    model_data = None
 
     if checkpoint_path != "":
         model_data = torch.load(checkpoint_path,
@@ -150,13 +144,13 @@ def run_train(train,
         train.train_loss = 0
         train.epoch_loss = 0
         # train
-        train_pb = tqdm(total=train.epoch_intv - 1,
+        train_pb = tqdm(total=train.epoch_intv,
                         leave=False,
                         unit="local_step")
         # load one file (max 64 samples per file)
         for train_batch in train_iter:
             # progress bar one step
-            trn_mini_b = get_mini_batch(data=train_batch[0],
+            trn_mini_b = get_mini_batch(data=train_batch,
                                         size_=mini_batch_size)
 
             with tqdm(trn_mini_b, leave=False, unit="minibatch") as minipb:
@@ -173,7 +167,7 @@ def run_train(train,
                         train.val_steps = 0
                         for val_batch in val_iter:
                             val_mini_batches = get_mini_batch(
-                                data=val_batch[0], size_=1)
+                                data=val_batch, size_=1)
                             train.eval(model, val_mini_batches)
 
                         train.val_loss = \
@@ -268,7 +262,6 @@ if __name__ == "__main__":
 
     # select a device
     device = select_device(args.gpu)
-    flair.device = device
 
     # Load configuration file
     configs = load_config_file(args.config_path)
@@ -283,8 +276,7 @@ if __name__ == "__main__":
         batch_size=configs["train_dataloader"]["file_batch"],
         shuffle=True,
         num_workers=configs["train_dataloader"]["num_workers"],
-        pin_memory=device.type == "cuda",
-        collate_fn=custom_collate)
+        pin_memory=device.type == "cuda")
 
     val_dataset = SlimDataset(root_dir=args.dataset_dir + "valid")
     val_iter = DataLoader(
@@ -292,8 +284,7 @@ if __name__ == "__main__":
         batch_size=configs["val_dataloader"]["file_batch"],
         shuffle=True,
         num_workers=configs["train_dataloader"]["num_workers"],
-        pin_memory=device.type == "cuda",
-        collate_fn=custom_collate)
+        pin_memory=device.type == "cuda")
 
     # load model
     if args.checkpoint_model == "":
@@ -325,6 +316,5 @@ if __name__ == "__main__":
     early_stop_patience = configs["early_stop_patience"]
     es = EarlyStopping(patience=early_stop_patience, min_delta=0.1)
 
-    run_train(trainer, train_iter, val_iter, model, optimizer, scheduler,
-              es, vis, train_param["mini_batch_size"],
-              checkpoint_interv)
+    run_train(trainer, train_iter, val_iter, model, optimizer, scheduler, es,
+              vis, train_param["mini_batch_size"], checkpoint_interv)

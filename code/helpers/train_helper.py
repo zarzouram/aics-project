@@ -81,6 +81,8 @@ class Trainer():
         optimizer.step()
         scheduler.step()
 
+        torch.cuda.empty_cache()
+
         self.train_loss = loss.item()
         self.epoch_loss += self.train_loss
 

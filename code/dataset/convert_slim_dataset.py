@@ -37,7 +37,7 @@ import tensorflow as tf
 import torch
 
 import numpy as np
-from dataset.tokenizer import BertPreprocessing
+from tokenizer import BertPreprocessing
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
@@ -329,18 +329,10 @@ def main():
                         default="turk_data",
                         help="Dataset name.")
 
-    parser.add_argument("--bert_dir",
-                        type=str,
-                        help="Path to Bert Model to tokenize Texts")
-
     parser.add_argument("--mode",
                         type=str,
                         default="train",
                         help="Mode {train, test, valid}")
-
-    parser.add_argument("--vocab_path",
-                        type=str,
-                        help="Path to the vocabulary json file")
 
     parser.add_argument("--batch-size",
                         type=int,

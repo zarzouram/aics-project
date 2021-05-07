@@ -1,12 +1,10 @@
 from typing import List
 
-import gc
-
 import torch
 from torch import nn
 from torch import Tensor
 
-from layers.text_encoding import TextEncoding
+from models.transformer_encoder import TransformerEncoderModel
 from models.representation import RepresentationNetwork
 from models.generation import DRAW
 
@@ -35,7 +33,7 @@ class SLIM(nn.Module):
 
         self.model_param = nn.Parameter(torch.empty(0))
 
-        self.embd = TextEncoding(hidden_size=caption_embs_size)
+        self.embd = TransformerEncoderModel(caption_embs_size=caption_embs_size)
 
         self.rep_model = RepresentationNetwork(
             caption_embs_size=caption_embs_size,
@@ -53,6 +51,8 @@ class SLIM(nn.Module):
             cond_size=scene_rep_size + views_emb_size,
         )
 
+        self.h_size = caption_embs_size
+
     def forward(self, batch: List[Tensor]) -> Tensor:
 
         # Sizes:
@@ -68,24 +68,19 @@ class SLIM(nn.Module):
         img = batch[0].to(device)  # (B, 3, 64, 64)
         view_imgr = batch[1].to(device)  # (B, 1)
         views_other = batch[2].to(device)  # (B, N, 9)
-        captions = batch[3].tolist()  # (B*N, 9)
+        tokens_id_context = batch[3].to(device)
+        attention_mask_context = batch[4].to(device)
 
         views_size = views_other.size(-1)
         scene_input_num = views_other.size(-2)
 
-        captions_emds = self.embd(captions)
+        captions_emds = self.embd(scr=tokens_id_context,
+                                  scr_mask=attention_mask_context)
         r = self.rep_model(cpt_embs=captions_emds,
                            viewpoints=views_other.view(-1, views_size),
                            n=scene_input_num)
 
         output = self.gen_model(x=img, cond=torch.cat((r, view_imgr), dim=1))
-
-        if device.type == "cuda":
-            del img
-            del view_imgr
-            del views_other
-            torch.cuda.empty_cache()
-            gc.collect()
 
         return output
 
@@ -95,13 +90,15 @@ class SLIM(nn.Module):
         img = batch[0].to(device)  # (B, 3, 64, 64)
         view_imgr = batch[1].to(device)  # (B, 1)
         views_other = batch[2].to(device)  # (B, N, 9)
-        captions = batch[3].tolist()  # (B*N, 9)
+        tokens_id_context = batch[3].to(device)
+        attention_mask_context = batch[4].to(device)
 
         # B = img.size(0)
         views_size = views_other.size(-1)
         scene_input_num = views_other.size(-2)
 
-        captions_emds = self.embd(captions)
+        captions_emds = self.embd(scr=tokens_id_context,
+                                  scr_mask=attention_mask_context)
         r = self.rep_model(cpt_embs=captions_emds,
                            viewpoints=views_other.view(-1, views_size),
                            n=scene_input_num)

@@ -1,4 +1,4 @@
-from typing import Tuple
+# from typing import Tuple
 
 import torch
 from torch import Tensor
@@ -8,7 +8,7 @@ from transformers import DistilBertModel
 
 
 class TextEncoding(nn.Module):
-    def __init__(self, hidden_size: int) -> None:
+    def __init__(self, caption_embs_size) -> None:
         """
         Parameters
         ----------
@@ -19,13 +19,13 @@ class TextEncoding(nn.Module):
         """
         super(TextEncoding, self).__init__()
 
-        self.embeddings = DistilBertModel.from_pretrained(
+        self.bert_embed = DistilBertModel.from_pretrained(
             'distilbert-base-uncased')
-        input_size = 2 * self.embeddings.config.hidden_size
-
-        self.encoder = nn.Linear(input_size, hidden_size)
-
+        embed_size = 2 * self.bert_embed.config.hidden_size
         self.dropout = nn.Dropout(0.5)
+        self.encoder = nn.Sequential(
+            nn.Linear(embed_size, embed_size // 3), nn.Tanh(),
+            nn.Linear(embed_size // 3, caption_embs_size), self.dropout)
 
     def forward(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
         """
@@ -54,18 +54,17 @@ class TextEncoding(nn.Module):
         # bert model accepts tensors in shape of (batch_size, sequence_length),
         # refrom the sizes from (B, N, T) to (B*N, T)
         seq_len = input_ids.size(-1)
-        output_bert = self.embeddings(input_ids=input_ids.view(-1, seq_len),
-                                      attention_mask=attention_mask.view(
-                                          -1, seq_len),
-                                      output_hidden_states=True,
-                                      return_dict=True)
+        with torch.no_grad():
+            hidden_states = self.bert_embed(
+                input_ids=input_ids.view(-1, seq_len),
+                attention_mask=attention_mask.view(-1, seq_len),
+                output_hidden_states=True,
+                return_dict=False)[1][-2:]
 
-        # Get last 4 hidden layers, concat them and perform mean pooling over
-        # sequence
-        hidden_states = output_bert.hidden_states[-2:]  # type: Tuple[Tensor]
-        text_rep = torch.cat(hidden_states, dim=-1)  # (B,T,2*H) - type: Tensor
-        text_rep_pooled = text_rep.mean(dim=1)  # (B, 2*H)
+            # Get last 2 hidden layers, concat them and perform mean pooling
+            # over sequence
+            text_rep = torch.cat(hidden_states, dim=-1)  # (B,T,2*H)
 
-        encoded = nn.tansh(self.encoder(text_rep_pooled))  # (B, E)
+        encoded = self.encoder(text_rep)  # (B,T,E)
 
-        return self.dropout(encoded)
+        return encoded

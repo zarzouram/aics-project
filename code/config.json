@@ -34,6 +34,6 @@
         "samples_num": 3200,
         "checkpoint_interv": 5
     },
-    "early_stop_patience": 3,
+    "early_stop_patience": 3000,
     "total_steps_num": 2000000
 }
