@@ -4,12 +4,12 @@ Ref:
 https://github.com/wohlert/generative-query-network-pytorch/tree/32f32632462d6796ecbc749a6617d3f3c0571b80
 
 """
-import math
 import torch
 # from torch import Tensor
 from torch import nn
 # import torch.nn.functional as F
 from torch.distributions.normal import Normal
+from torch.distributions.uniform import Uniform
 # from torch.distributions.bernoulli import Bernoulli
 
 from layers.conv_lstm_conv import ConvLSTMCell
@@ -81,12 +81,17 @@ class DRAW(nn.Module):
         # read and write
         self.write = nn.Sequential(
             nn.Conv2d(h_size, h_size // 2, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
             nn.ConvTranspose2d(h_size // 2,
                                12,
                                kernel_size=6,
                                stride=4,
                                padding=1), nn.ReLU(),
-            nn.ConvTranspose2d(12, img_c, kernel_size=4, stride=2, padding=1))
+            nn.ConvTranspose2d(12,
+                               2 * img_c,
+                               kernel_size=4,
+                               stride=2,
+                               padding=1), nn.ReLU())
 
         self.read = nn.Conv2d(img_c,
                               img_c,
@@ -101,7 +106,11 @@ class DRAW(nn.Module):
                                      stride=1,
                                      padding=2)
 
-        self.log_var = nn.Parameter(torch.Tensor([0.0]))
+        self.prior = nn.Conv2d(h_size,
+                               2 * z_size,
+                               kernel_size=5,
+                               stride=1,
+                               padding=2)
 
     def forward(self, x, cond):
         batch_size = x.size(0)
@@ -119,6 +128,9 @@ class DRAW(nn.Module):
 
         r = x.new_zeros((batch_size, self.c, self.h, self.w), device=device)
 
+        noise = Uniform(-1 / 265, 1 / 265).rsample(x.size()).to(x.device)
+        x += noise
+
         kl = 0
         for _ in range(self.T):
             # Reconstruction error
@@ -126,8 +138,8 @@ class DRAW(nn.Module):
 
             # Infer posterior density from hidden state (W//8)
             # (B, 128, 8, 8)
-            h_enc, c_enc = self.encoder(
-                torch.cat([x, epsilon], dim=1), h_enc, c_enc)
+            h_enc, c_enc = self.encoder(torch.cat([x, epsilon], dim=1), h_enc,
+                                        c_enc)
 
             # Posterior distribution
             # (B, 3, 8, 8): z channel = 3
@@ -141,10 +153,18 @@ class DRAW(nn.Module):
             # (B, 3, 8, 8)
             z = q_posterior.rsample()
 
+            # Prior distribution
+            # (B, 3, 8, 8): z channel = 3
+            p_mu, p_log_std = torch.split(self.prior(h_dec),
+                                          self.z_size,
+                                          dim=1)
+            p_std = torch.exp(p_log_std)
+            p_prior = Normal(p_mu, p_std)
+
+            # Send representation through decoder
             # (B, 3, 64, 64) ==> (B, 3, 8, 8)
             r_next = self.read(r)
 
-            # Send representation through decoder
             # (B, 128, 8, 8)
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
@@ -152,26 +172,22 @@ class DRAW(nn.Module):
                                         h_dec, c_dec)
 
             # write representation
-            r_ = self.write(h_dec)  # (B, 128, 8, 8) ==> (B, 3, 64, 64)
-            r = r + r_
+            # (B, 128, 8, 8) ==> 2*(B, 3, 64, 64)
+            r_mu, r_log_var = torch.split(self.write(h_dec), self.c, dim=1)
+            r = r + r_mu
 
             # KL divergence
-            prior = Normal(torch.zeros_like(q_mu), torch.ones_like(q_std))
             log_qzx = q_posterior.log_prob(z)
-            log_pz = prior.log_prob(z)
+            log_pz = p_prior.log_prob(z)
             kl += log_qzx - log_pz
 
         # Return the reconstruction and kl
-        # Gaussian negative log likelihood loss
-        # source:
-        # https://github.com/pytorch/pytorch/blob/6cdabb2e40a46a49ace66f5d94ed9c48bf6c3372/torch/nn/functional.py#L2597  # noqa:
-        var = x.new_ones((1, ))
-        const = math.log(2 * math.pi)
-        loss_ = ((x - r)**2).view(batch_size, -1)
-        constxn_loss = 0.5 * ((torch.log(var) + loss_ / var).sum(dim=1) + const)
-
+        r_var = torch.exp(r_log_var)
+        image_dist = Normal(r, r_var)
+        constxn_loss = image_dist.log_prob(x)
+        constxn_loss = torch.sum(constxn_loss.view(batch_size, -1), dim=1)
         kl_loss = torch.sum(kl.view(batch_size, -1), dim=1)
-        loss = torch.mean(constxn_loss + kl_loss)
+        loss = torch.mean(kl_loss - constxn_loss)
 
         return r, loss
 
@@ -191,6 +207,11 @@ class DRAW(nn.Module):
         r = x.new_zeros((batch_size, self.c, self.h, self.w))
 
         for _ in range(self.T):
+            # p_mu, q_log_var = torch.split(self.prior(h_dec),
+            #                               self.z_size,
+            #                               dim=1)
+            # p_std = torch.exp(q_log_var / 2)
+            # z = Normal(p_mu, p_std).sample()
             z = torch.randn(batch_size,
                             self.z_size,
                             self.h // 8,
@@ -204,7 +225,7 @@ class DRAW(nn.Module):
             h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
                                         h_dec, c_dec)
 
-            r_ = self.write(h_dec)
-            r = r + r_
+            r_mu, _ = torch.split(self.write(h_dec), self.c, dim=1)
+            r = r + r_mu
 
         return r
