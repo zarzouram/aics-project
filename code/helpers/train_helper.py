@@ -7,6 +7,7 @@ import torch
 from utils.pytorch_modelsize import SizeEstimator
 
 import warnings
+
 warnings.filterwarnings("ignore",
                         message="Please also save or load the state ")
 
@@ -44,6 +45,10 @@ class Trainer():
         self.train_loss = 0
         self.epoch_loss = 0
         self.val_loss = 0
+        self.kl_train = 0
+        self.lx_train = 0
+        self.kl_val = 0
+        self.lx_val = 0
         self.best_loss = 1e6  # best valid_tn loss
 
         self.save_path = save_path  # path to save best mpdel
@@ -56,12 +61,12 @@ class Trainer():
         self.postfix = {"epoch loss": 0.0, "test loss": 0.0}
         self.trainpb.set_description(f"Global Step {self.global_steps}")
 
-    def step(self, model, optimizer, scheduler, batch, check_grad=False):
+    def step(self, model, optimizer, scheduler, batch, vs, check_grad=False):
         # train model
         model.train()
         optimizer.zero_grad()
         # forward
-        _, loss = model(batch)
+        _, loss, (kl, lx) = model(batch, vs)
         # backward and update
         loss.backward()
 
@@ -85,25 +90,35 @@ class Trainer():
 
         self.train_loss = loss.item()
         self.epoch_loss += self.train_loss
+        self.kl_train += kl
+        self.lx_train += lx
 
-    def eval(self, model, val_batch):
+    def eval(self, model, val_batch, vs):
         # validate
         model.eval()
         with tqdm(val_batch, leave=False, unit="valbatch") as valpb:
             for val_mini_batch in valpb:
 
                 with torch.no_grad():
-                    _, loss = model(val_mini_batch)
+                    _, loss, (kl, lx) = model(val_mini_batch, vs)
                     self.val_loss += loss.item()
+                    self.kl_val += kl
+                    self.lx_val += lx
 
                 self.val_steps += 1
+
                 # update progress bars
                 valpb.set_postfix({"test loss": loss.item()})
                 valpb.update(1)
 
         return
 
-    def save_checkpoint(self, model, optimizer, scheduler, best_model=True):
+    def save_checkpoint(self,
+                        model,
+                        optimizer,
+                        scheduler,
+                        var_scale,
+                        best_model=True):
         model_state = model.state_dict()
         optimizer_state = optimizer.state_dict()
         scheduler_state = scheduler.state_dict()
@@ -120,7 +135,8 @@ class Trainer():
             "epoch": self.epoch,
             "model_state_dict": model_state,
             "optimizer_state_dict": optimizer_state,
-            "scheduler_state_dict": scheduler_state
+            "scheduler_state_dict": scheduler_state,
+            "var_scale": var_scale
         }
 
         torch.save(state_dict, save_path)

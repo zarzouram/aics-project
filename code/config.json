@@ -29,6 +29,13 @@
         "lr_final": 5e-5,
         "step_num": 1e6
     },
+    "var_scale_parm": {
+        "init": 2.0,
+        "final": 1.0,
+        "constant": 1.0,
+        "steps": 500000,
+        "pretrain": 30750
+    },
     "train_param": {
         "mini_batch_size": 32,
         "samples_num": 3200,

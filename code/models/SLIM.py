@@ -33,7 +33,8 @@ class SLIM(nn.Module):
 
         self.model_param = nn.Parameter(torch.empty(0))
 
-        self.embd = TransformerEncoderModel(caption_embs_size=caption_embs_size)
+        self.embd = TransformerEncoderModel(
+            caption_embs_size=caption_embs_size)
 
         self.rep_model = RepresentationNetwork(
             caption_embs_size=caption_embs_size,
@@ -53,7 +54,7 @@ class SLIM(nn.Module):
 
         self.h_size = caption_embs_size
 
-    def forward(self, batch: List[Tensor]) -> Tensor:
+    def forward(self, batch: List[Tensor], vs: int) -> Tensor:
 
         # Sizes:
         # ------
@@ -80,7 +81,9 @@ class SLIM(nn.Module):
                            viewpoints=views_other.view(-1, views_size),
                            n=scene_input_num)
 
-        output = self.gen_model(x=img, cond=torch.cat((r, view_imgr), dim=1))
+        output = self.gen_model(x=img,
+                                cond=torch.cat((r, view_imgr), dim=1),
+                                var_scale=vs)
 
         return output
 

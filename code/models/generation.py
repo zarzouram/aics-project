@@ -103,7 +103,7 @@ class DRAW(nn.Module):
 
         self.log_var = nn.Parameter(torch.Tensor([0.0]))
 
-    def forward(self, x, cond):
+    def forward(self, x, cond, var_scale):
         batch_size = x.size(0)
         device = self.model_param.device
 
@@ -165,15 +165,15 @@ class DRAW(nn.Module):
         # Gaussian negative log likelihood loss
         # source:
         # https://github.com/pytorch/pytorch/blob/6cdabb2e40a46a49ace66f5d94ed9c48bf6c3372/torch/nn/functional.py#L2597  # noqa:
-        var = x.new_ones((1, ))
+        var = x.new_ones((1, )) * var_scale
         const = math.log(2 * math.pi)
         loss_ = ((x - r)**2).view(batch_size, -1)
         constxn_loss = 0.5 * ((torch.log(var) + loss_ / var).sum(dim=1) + const)
+        constxn_loss = torch.mean(constxn_loss)
+        kl_loss = torch.mean(torch.sum(kl.view(batch_size, -1), dim=1))
+        loss = constxn_loss + kl_loss
 
-        kl_loss = torch.sum(kl.view(batch_size, -1), dim=1)
-        loss = torch.mean(constxn_loss + kl_loss)
-
-        return r, loss
+        return r, loss, (kl_loss.item(), constxn_loss.item())
 
     def generate(self, x, cond):
         """

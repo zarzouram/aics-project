@@ -9,31 +9,23 @@ class Visualizations:
             env_name = str(datetime.now().strftime("%d-%m %Hh%M"))
         self.env_name = env_name
         self.vis = visdom.Visdom(env=self.env_name)
-        self.loss_win = f"{env_name}_win"
-        self.grad_norm_win = f"{env_name}_gwin"
+        self.win_name = {}
+        self.win_opts = {}
 
-    def plot_loss(self, loss, step, name):
-        self.vis.line(
-            [loss], [step],
-            win=self.loss_win,
-            name=name,
-            update='append' if self.loss_win else None,
-            opts=dict(
-                xlabel='Epoch',
-                ylabel='Loss',
-                title='Training and Validation Loss mean every 100 step',
-                # showlegend=True,
-                legend=["Train", "Validation"]
-            ))
+    def add_wins(self, win_name: list, xlabel: list, ylabel: list, title: list,
+                 legend: list):
 
-    def plot_grad_norm(self, grad_norm, step, name):
-        self.vis.line(
-            [grad_norm], [step],
-            win=self.grad_norm_win,
-            name=name,
-            update='append' if self.grad_norm_win else None,
-            opts=dict(
-                xlabel='Step',
-                ylabel='grad_norm',
-                title='Average grad norm',
-            ))
+        for i in range(len(win_name)):
+            self.win_name[win_name[i]] = f"{win_name[i]}"
+            self.win_opts[win_name[i]] = dict(xlabel=xlabel[i],
+                                              ylabel=ylabel[i],
+                                              title=title[i],
+                                              showlegend=bool(legend[i]),
+                                              legend=legend[i])
+
+    def plot_line(self, y, x, name, win_name):
+        self.vis.line([y], [x],
+                      win=self.win_name[win_name],
+                      name=name,
+                      update='append',
+                      opts=self.win_opts[win_name])

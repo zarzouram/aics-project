@@ -29,7 +29,7 @@ class LinearDecayLR(_LRScheduler):
         ]
 
 
-class SigmaAnnealer:
+class VarAnnealer:
     """Annealer for Loss function in the genration network.
     Args:
         init (float): Initial value.
@@ -38,34 +38,39 @@ class SigmaAnnealer:
         steps (int): Number of annealing steps.
         pretrain (int): Number of pre-training steps.
     """
-    def __init__(self, init: float, final: float, constant: float, steps: int,
-                 pretrain: int) -> None:
-
-        # based on
-        # https://github.com/rnagumo/gqnlib/blob/96bd8499f90c00b29817f71e6380bc622ce78479/gqnlib/scheduler.py#L66
+    def __init__(self,
+                 init: float = 1.0,
+                 final: float = 2.0,
+                 constant: float = 1.0,
+                 steps: int = 700000,
+                 pretrain: int = 30500) -> None:
 
         if steps < pretrain:
             steps += pretrain
 
         self.init = init
-        self.rate = (init - final) / (steps - pretrain)
+        self.rate = (init - final) / steps
         self.final = final
         self.constant = constant
         self.pretrain = pretrain
 
-        # Current time step
+        self.scale = 0
+
+        # Current step
         self.t = 0
 
     def __iter__(self):
         return self
 
     def __next__(self) -> float:
-        self.t += 1
 
         if self.t <= self.pretrain:
             value = self.constant
         else:
             value = max(self.init - self.rate * self.t, self.final)
 
-        # Return sigma
+        self.t += 1
+
+        self.scale = value
+        # Return var scale
         return value
