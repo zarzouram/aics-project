@@ -37,7 +37,7 @@ def parse_arguments():
     parser.add_argument(
         "--dataset_dir",
         type=str,
-        default="/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch/",
+        default="/scratch/guszarzmo/aicsproject/data/slim/turk_data_torch/",
         help="SLIM Dataset directory.")
 
     parser.add_argument(
@@ -111,7 +111,7 @@ def load_model(model_parameters: dict,
     lr_init = scheduler_param["lr_init"]
     model = SLIM(model_parameters)
     model = model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr_init)
+    optimizer = optim.Adam(model.parameters(), lr=lr_init, weight_decay=0.0001)
     scheduler = LinearDecayLR(optimizer)
     model_data = None
 
@@ -144,110 +144,102 @@ def run_train(train,
         train.train_loss = 0
         train.epoch_loss = 0
         # train
-        train_pb = tqdm(total=train.epoch_intv,
-                        leave=False,
-                        unit="local_step")
+        train_pb = tqdm(total=train.epoch_intv, leave=False, unit="local_step")
         # load one file (max 64 samples per file)
         for train_batch in train_iter:
             # progress bar one step
             trn_mini_b = get_mini_batch(data=train_batch,
                                         size_=mini_batch_size)
 
-            with tqdm(trn_mini_b, leave=False, unit="minibatch") as minipb:
-                minipb.set_description("minibatch train")
+            # train min batches
+            for data in trn_mini_b:
+                train.step(model, optimizer, scheduler, data)
 
-                # train min batches
-                for data in minipb:
-                    train.step(model, optimizer, scheduler, data)
+                best_model = False
+                # eval, each CHECK_POINT steps (every 5 epochs)
+                if (train.global_steps + 1) % checkpoint_interv == 0:
+                    train.val_loss = 0
+                    train.val_steps = 0
+                    for val_batch in val_iter:
+                        val_mini_batches = get_mini_batch(data=val_batch,
+                                                          size_=1)
+                        train.eval(model, val_mini_batches)
 
-                    best_model = False
-                    # eval, each CHECK_POINT steps (every 5 epochs)
-                    if (train.global_steps + 1) % checkpoint_interv == 0:
-                        train.val_loss = 0
-                        train.val_steps = 0
-                        for val_batch in val_iter:
-                            val_mini_batches = get_mini_batch(
-                                data=val_batch, size_=1)
-                            train.eval(model, val_mini_batches)
+                    train.val_loss = \
+                        train.val_loss / train.val_steps
 
-                        train.val_loss = \
-                            train.val_loss / train.val_steps
-
-                        # update main progress bar
-                        train.postfix["test loss"] = train.val_loss
-                        train.trainpb.set_postfix(train.postfix)
-
-                        # plot validation, save plot
-                        vis.plot_loss(train.val_loss, train.epoch,
-                                      "Validation")
-                        vis.vis.save([vis.env_name])
-
-                        # save model
-                        val_loss = round(train.val_loss, 2)
-                        best_loss = round(train.best_loss, 2)
-                        if val_loss <= best_loss:
-                            train.best_loss = train.val_loss
-                            best_model = True
-
-                        # early stopping
-                        if es.step(train.val_loss):
-                            train.train_loss = \
-                                train.train_loss / train.local_steps
-                            train.in_train = False
-
-                    # End of epoch: Reach number of samples
-                    if (train.global_steps + 1) % train.epoch_intv == 0:
-                        train.epoch_finished = True
-                        train.epoch_loss = train.epoch_loss / (
-                            train.local_steps + 1)
-                        # plot, save plot
-                        vis.plot_loss(train.epoch_loss, train.epoch, "Train")
-                        vis.vis.save([vis.env_name])
-                        train.postfix["epoch loss"] = train.epoch_loss
-                        train.epoch += 1
-
-                    # Reach the end of train loop
-                    if (train.global_steps + 1) == train.end:
-                        train.in_train = False
-                        # self.train_loss = self.train_loss / self.local_steps
-
-                    if check_grad:
-                        vis.plot_grad_norm(train.total_norm,
-                                           train.global_steps + 1,
-                                           "average gradient norm")
-
-                    if train.epoch_finished:
-                        # save model and plot
-                        train.save_checkpoint(model,
-                                              optimizer,
-                                              scheduler,
-                                              best_model=best_model)
-                        vis.vis.save([vis.env_name])
-
-                    train.local_steps += 1
-                    train.global_steps += 1
-
-                    # update progress bars
-                    desc_minib = f"LocalStep {train.local_steps}"
-                    decc_epoch1 = f"Global Step {train.global_steps} "
-                    decc_epoch2 = f"- epoch: {train.epoch}"
-
-                    minipb.set_postfix({"train loss": train.train_loss})
-                    train_pb.set_postfix({"train loss": train.train_loss})
+                    # update main progress bar
+                    train.postfix["test loss"] = train.val_loss
                     train.trainpb.set_postfix(train.postfix)
 
-                    train_pb.set_description(desc_minib)
-                    train.trainpb.set_description(decc_epoch1 + decc_epoch2)
+                    # save model
+                    val_loss = round(train.val_loss, 2)
+                    best_loss = round(train.best_loss, 2)
+                    if val_loss <= best_loss:
+                        train.best_loss = train.val_loss
+                        best_model = True
 
-                    train.trainpb.update(1)
-                    train_pb.update(1)
+                    # plot validation, save plot
+                    vis.plot_loss(train.val_loss, train.epoch, "Validation")
+                    vis.vis.save([vis.env_name])
 
-                    if train.epoch_finished or not train.in_train:
-                        break
+                    # early stopping
+                    if es.step(train.val_loss):
+                        train.train_loss = \
+                            train.train_loss / train.local_steps
+                        train.in_train = False
+
+                # End of epoch: Reach number of samples
+                if (train.global_steps + 1) % train.epoch_intv == 0:
+                    train.epoch_finished = True
+                    train.epoch_loss = train.epoch_loss / (train.local_steps +
+                                                           1)
+                    # plot, save plot
+                    vis.plot_loss(train.epoch_loss, train.epoch, "Train")
+                    vis.vis.save([vis.env_name])
+                    train.postfix["epoch loss"] = train.epoch_loss
+                    train.epoch += 1
+
+                # Reach the end of train loop
+                if (train.global_steps + 1) == train.end:
+                    train.in_train = False
+                    # self.train_loss = self.train_loss / self.local_steps
+
+                if check_grad:
+                    vis.plot_grad_norm(train.total_norm,
+                                       train.global_steps + 1,
+                                       "average gradient norm")
+
+                if train.epoch_finished:
+                    # save model and plot
+                    train.save_checkpoint(model,
+                                          optimizer,
+                                          scheduler,
+                                          best_model=best_model)
+                    vis.vis.save([vis.env_name])
+
+                train.local_steps += 1
+                train.global_steps += 1
+
+                # update progress bars
+                desc_minib = f"LocalStep {train.local_steps}"
+                decc_epoch1 = f"Global Step {train.global_steps} "
+                decc_epoch2 = f"- epoch: {train.epoch}"
+
+                train_pb.set_postfix({"train loss": train.train_loss})
+                train.trainpb.set_postfix(train.postfix)
+
+                train_pb.set_description(desc_minib)
+                train.trainpb.set_description(decc_epoch1 + decc_epoch2)
+
+                train.trainpb.update(1)
+                train_pb.update(1)
+
+                if train.epoch_finished or not train.in_train:
+                    break
 
             if train.epoch_finished or not train.in_train:
                 train.epoch_finished = False
-                minipb.close()
                 train_pb.close()
                 if not train.in_train:
                     print("\nTraining finished ...")

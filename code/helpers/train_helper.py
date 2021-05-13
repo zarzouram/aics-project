@@ -7,6 +7,7 @@ import torch
 from utils.pytorch_modelsize import SizeEstimator
 
 import warnings
+
 warnings.filterwarnings("ignore",
                         message="Please also save or load the state ")
 
