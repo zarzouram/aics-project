@@ -117,11 +117,18 @@ class ConvLSTMCell(nn.Module):
 
         self.b_c = nn.Parameter(torch.zeros(1, input_w))
 
+        self.nrm_i = nn.GroupNorm(1, hidden_channels)
+        self.nrm_f = nn.GroupNorm(1, hidden_channels)
+        self.nrm_c = nn.GroupNorm(1, hidden_channels)
+        self.nrm_o = nn.GroupNorm(1, hidden_channels)
+
     def forward(self, x, h, c):
-        ci = torch.sigmoid(self.Wxi(x) + self.Whi(h) + self.Wci(c))
-        cf = torch.sigmoid(self.Wxf(x) + self.Whf(h) + self.Wcf(c))
-        cc = cf * c + ci * torch.tanh(self.Wxc(x) + self.Whc(h) + self.b_c)
-        co = torch.sigmoid(self.Wxo(x) + self.Who(h) + self.Wco(cc))
+        ci = torch.sigmoid(self.nrm_i(self.Wxi(x) + self.Whi(h) + self.Wci(c)))
+        cf = torch.sigmoid(self.nrm_f(self.Wxf(x) + self.Whf(h) + self.Wcf(c)))
+        cc = cf * c + ci * torch.tanh(
+            self.nrm_f(self.Wxc(x) + self.Whc(h) + self.b_c))
+        co = torch.sigmoid(
+            self.nrm_o(self.Wxo(x) + self.Who(h) + self.Wco(cc)))
         ch = co * torch.tanh(cc)
         return ch, cc
 

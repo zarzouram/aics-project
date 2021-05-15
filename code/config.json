@@ -11,7 +11,7 @@
         "file_batch": 1,
         "num_workers": 4
     },
-    "checkpoints_dir": "/home/guszarzmo@GU.GU.SE/LT2318/aics-project/data/models/",
+    "checkpoints_dir": "/scratch/guszarzmo/aicsproject/checkpoints/transf_encr_dist/",
     "model_hyperparameter": {
         "caption_embs_size": 64,
         "views_emb_size": 4,

@@ -15,7 +15,7 @@ from dataset.dataset_batcher import SlimDataset
 from models.SLIM import SLIM
 from dataset.preprocessing import get_mini_batch
 from helpers.train_helper import Trainer
-from helpers.early_stopping import EarlyStopping
+# from helpers.early_stopping import EarlyStopping
 from helpers.scheduler import LinearDecayLR, VarAnnealer
 
 from utils.gpu_cuda_helper import get_gpus_avail
@@ -37,7 +37,7 @@ def parse_arguments():
     parser.add_argument(
         "--dataset_dir",
         type=str,
-        default="/home/guszarzmo@GU.GU.SE/Corpora/slim/turk_data_torch/",
+        default="/scratch/guszarzmo/aicsproject/data/slim/turk_data_torch/",
         help="SLIM Dataset directory.")
 
     parser.add_argument(
@@ -60,7 +60,7 @@ def parse_arguments():
 
     parser.add_argument("--plot_loss_comp",
                         type=str,
-                        default="n",
+                        default="y",
                         help="Plot each component of loss separately")
 
     parser.add_argument("--gpu",
@@ -150,8 +150,8 @@ def run_train(train,
               check_grad=False):
 
     # early stop
-    early_stop_patience = configs["early_stop_patience"]
-    es = EarlyStopping(patience=early_stop_patience, min_delta=0.1)
+    # early_stop_patience = configs["early_stop_patience"]
+    # es = EarlyStopping(patience=early_stop_patience, min_delta=0.1)
 
     # other training param
     train_param = configs["train_param"]
@@ -218,11 +218,11 @@ def run_train(train,
                         train.best_loss = train.val_loss
                         best_model = True
 
-                    # early stopping
-                    if es.step(train.val_loss):
-                        train.train_loss = \
-                            train.train_loss / train.local_steps
-                        train.in_train = False
+                    # # early stopping
+                    # if es.step(train.val_loss):
+                    #     train.train_loss = \
+                    #         train.train_loss / train.local_steps
+                    #     train.in_train = False
 
                 # End of epoch: Reach number of samples
                 if (train.global_steps + 1) % train.epoch_intv == 0:
