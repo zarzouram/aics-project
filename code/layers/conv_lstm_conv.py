@@ -23,7 +23,7 @@ class HadamardproductLayer(nn.Module):
         self.w = w
 
         self.weights = Parameter(torch.zeros(1, n, h, w))
-        self.b = Parameter(torch.zeros(1, h))
+        self.b = Parameter(torch.zeros(1, n, h))
 
     # def init_parameters(self):
     #     # initialize weigths and biase
@@ -33,7 +33,7 @@ class HadamardproductLayer(nn.Module):
     #     init.uniform_(self.b, -bound, bound)
 
     def forward(self, x):
-        return x * self.weights + self.b
+        return x * self.weights + self.b[:, :, :, None]
 
     def extra_repr(self) -> str:
         return f"n={self.n}, h={self.h}, w={self.w}"
@@ -49,8 +49,8 @@ class ConvLSTMCell(nn.Module):
 
 
     """
-    def __init__(self, input_w, input_channels, hidden_channels, kernel_size,
-                 stride, padding):
+    def __init__(self, function, input_w, input_channels, hidden_channels,
+                 kernel_size, stride, padding):
         super(ConvLSTMCell, self).__init__()
 
         # assert hidden_channels % 2 == 0
@@ -62,25 +62,30 @@ class ConvLSTMCell(nn.Module):
 
         kwargs = dict(kernel_size=kernel_size, stride=stride, padding=padding)
 
-        self.Wxf = nn.Conv2d(self.input_channels,
-                             self.hidden_channels,
-                             bias=False,
-                             **kwargs)
+        if function == "encode":
+            conv_fn = nn.Conv2d
+        else:
+            conv_fn = nn.ConvTranspose2d
 
-        self.Wxi = nn.Conv2d(self.input_channels,
-                             self.hidden_channels,
-                             bias=False,
-                             **kwargs)
+        self.Wxf = conv_fn(self.input_channels,
+                           self.hidden_channels,
+                           bias=False,
+                           **kwargs)
 
-        self.Wxc = nn.Conv2d(self.input_channels,
-                             self.hidden_channels,
-                             bias=False,
-                             **kwargs)
+        self.Wxi = conv_fn(self.input_channels,
+                           self.hidden_channels,
+                           bias=False,
+                           **kwargs)
 
-        self.Wxo = nn.Conv2d(self.input_channels,
-                             self.hidden_channels,
-                             bias=False,
-                             **kwargs)
+        self.Wxc = conv_fn(self.input_channels,
+                           self.hidden_channels,
+                           bias=False,
+                           **kwargs)
+
+        self.Wxo = conv_fn(self.input_channels,
+                           self.hidden_channels,
+                           bias=False,
+                           **kwargs)
 
         # hidden state
         self.Whf = nn.Conv2d(self.hidden_channels,
@@ -115,7 +120,7 @@ class ConvLSTMCell(nn.Module):
         self.Wcf = HadamardproductLayer(hidden_channels, input_w, input_w)
         self.Wco = HadamardproductLayer(hidden_channels, input_w, input_w)
 
-        self.b_c = nn.Parameter(torch.zeros(1, input_w))
+        self.b_c = nn.Parameter(torch.zeros(1, hidden_channels, input_w))
 
         self.nrm_i = nn.GroupNorm(1, hidden_channels)
         self.nrm_f = nn.GroupNorm(1, hidden_channels)
@@ -126,24 +131,24 @@ class ConvLSTMCell(nn.Module):
         ci = torch.sigmoid(self.nrm_i(self.Wxi(x) + self.Whi(h) + self.Wci(c)))
         cf = torch.sigmoid(self.nrm_f(self.Wxf(x) + self.Whf(h) + self.Wcf(c)))
         cc = cf * c + ci * torch.tanh(
-            self.nrm_f(self.Wxc(x) + self.Whc(h) + self.b_c))
+            self.nrm_f(self.Wxc(x) + self.Whc(h) + self.b_c[:, :, :, None]))
         co = torch.sigmoid(
             self.nrm_o(self.Wxo(x) + self.Who(h) + self.Wco(cc)))
         ch = co * torch.tanh(cc)
         return ch, cc
 
-    def init_hidden(self, batch_size, hidden, shape):
+    def init_hidden(self, batch_size, channel_size, shape):
 
         device = self.model_param.device
 
         h_0 = torch.zeros(batch_size,
-                          hidden,
+                          channel_size,
                           shape[0],
                           shape[1],
                           device=device)
 
         c_0 = torch.zeros(batch_size,
-                          hidden,
+                          channel_size,
                           shape[0],
                           shape[1],
                           device=device)

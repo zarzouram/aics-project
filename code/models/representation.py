@@ -28,11 +28,11 @@ class RepresentationNetwork(nn.Module):
         rep_input_size = caption_embs_size + viewpoints_embs_size
         self.r_size = r_size
         self.scene_encoder = nn.Sequential(
-            nn.Linear(rep_input_size, 512),
+            nn.Linear(rep_input_size, 50),
             nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(50, 50),
             nn.ReLU(),
-            nn.Linear(512, r_size),
+            nn.Linear(50, r_size),
         )
 
     def forward(self, cpt_embs: Tensor, viewpoints: Tensor, n: int) -> Tensor:

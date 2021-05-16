@@ -60,50 +60,45 @@ class DRAW(nn.Module):
 
         self.z_size = z_size
         self.h_size = h_size
-        self.e_size = h_size
         self.T = iter_num
 
         # Recurrent encoder/decoder models
-        self.encoder = ConvLSTMCell(img_w // self.scale,
-                                    2 * img_c,
+        self.encoder = ConvLSTMCell("encode",
+                                    img_w // self.scale,
+                                    4 * img_c,
                                     h_size,
                                     kernel_size=19,
                                     stride=7,
                                     padding=2)
 
-        self.decoder = ConvLSTMCell(img_w // self.scale,
-                                    z_size + img_c + cond_size,
-                                    h_size,
-                                    kernel_size=5,
-                                    stride=1,
+        self.decoder = ConvLSTMCell("decode",
+                                    img_w,
+                                    z_size * 2 + cond_size,
+                                    2 * img_c,
+                                    kernel_size=19,
+                                    stride=7,
                                     padding=2)
 
         # read and write
         self.write_mu = nn.Sequential(
-            nn.Conv2d(h_size, h_size // 2, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            nn.ConvTranspose2d(h_size // 2,
-                               12,
-                               kernel_size=6,
-                               stride=4,
-                               padding=1), nn.ReLU(),
-            nn.ConvTranspose2d(12, img_c, kernel_size=4, stride=2, padding=1),
-            nn.GroupNorm(1, img_c))
+            nn.Conv2d(2 * img_c,
+                      img_c,
+                      kernel_size=3,
+                      stride=1,
+                      padding=2,
+                      dilation=2), nn.GroupNorm(1, img_c))
 
         self.write_log_var = nn.Sequential(
-            nn.Conv2d(h_size, h_size // 2, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            nn.ConvTranspose2d(h_size // 2,
-                               12,
-                               kernel_size=6,
-                               stride=4,
-                               padding=1), nn.ReLU(),
-            nn.ConvTranspose2d(12, img_c, kernel_size=4, stride=2, padding=1),
-            nn.GroupNorm(1, img_c), nn.ReLU())
+            nn.Conv2d(2 * img_c,
+                      img_c,
+                      kernel_size=3,
+                      stride=1,
+                      padding=2,
+                      dilation=2), nn.GroupNorm(1, img_c), nn.ReLU())
 
         self.read = nn.Sequential(
-            nn.Conv2d(img_c, img_c, kernel_size=17, stride=7, padding=1),
-            nn.GroupNorm(1, img_c))
+            nn.Conv2d(img_c, z_size, kernel_size=17, stride=7, padding=1),
+            nn.GroupNorm(1, z_size))
 
         # Outputs parameters of distributions
         self.variational = nn.Conv2d(h_size,
@@ -117,14 +112,16 @@ class DRAW(nn.Module):
         device = self.model_param.device
 
         # Hidden states initialization
+        # encoder hidden state size = (B, 128, 8, 8)
+        # decoder hidden state size = (B, 3, 64, 64)
         shape = (self.h // self.scale, self.w // self.scale)
         (h_enc, c_enc) = self.encoder.init_hidden(batch_size=batch_size,
-                                                  hidden=self.h_size,
+                                                  channel_size=self.h_size,
                                                   shape=shape)
 
         (h_dec, c_dec) = self.decoder.init_hidden(batch_size=batch_size,
-                                                  hidden=self.h_size,
-                                                  shape=shape)
+                                                  channel_size=2 * self.c,
+                                                  shape=(self.h, self.w))
 
         r = x.new_zeros((batch_size, self.c, self.h, self.w), device=device)
 
@@ -134,12 +131,12 @@ class DRAW(nn.Module):
             epsilon = x - r  # (B, 3, 64, 64)
 
             # Infer posterior density from hidden state (W//8)
-            # (B, 128, 8, 8)
-            h_enc, c_enc = self.encoder(torch.cat([x, epsilon], dim=1), h_enc,
-                                        c_enc)
+            # (B, 3+3+6, 64, 64) ==> (B, 128, 8, 8)
+            h_enc, c_enc = self.encoder(torch.cat([x, epsilon, h_dec], dim=1),
+                                        h_enc, c_enc)
 
             # Posterior distribution
-            # (B, 3, 8, 8): z channel = 3
+            # (B, 128, 8, 8) ==> 2*(B, 64, 8, 8)
             q_mu, q_log_var = torch.split(self.variational(h_enc),
                                           self.z_size,
                                           dim=1)
@@ -147,21 +144,21 @@ class DRAW(nn.Module):
             q_posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
-            # (B, 3, 8, 8)
+            # (B, 64, 8, 8)
             z = q_posterior.rsample()
 
-            # (B, 3, 64, 64) ==> (B, 3, 8, 8)
+            # (B, 3, 64, 64) ==> (B, 64, 8, 8)
             r_next = self.read(r)
 
             # Send representation through decoder
-            # (B, 128, 8, 8)
+            # (B, 64+64+96, 8, 8) ==> (B, 6, 64, 64)
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
             h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
                                         h_dec, c_dec)
 
             # write representation
-            # (B, 128, 8, 8) ==> 2 * (B, 3, 64, 64)
+            # (B, 6, 64, 64) ==> 2 * (B, 3, 64, 64)
             r_mu = self.write_mu(h_dec)
             r = r + r_mu
 
@@ -171,6 +168,7 @@ class DRAW(nn.Module):
             log_pz = prior.log_prob(z)
             kl += log_qzx - log_pz
 
+        # (B, 6, 64, 64) ==> 2 * (B, 3, 64, 64)
         r_log_var = self.write_log_var(h_dec).view(batch_size, -1)
 
         # Return the reconstruction and kl
