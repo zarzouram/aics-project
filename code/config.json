@@ -11,7 +11,7 @@
         "file_batch": 1,
         "num_workers": 4
     },
-    "checkpoints_dir": "/scratch/guszarzmo/aicsproject/checkpoints/transf_encr_dist/",
+    "checkpoints_dir": "/scratch/guszarzmo/aicsproject/checkpoints/transf_encr_dist/z-3-nograd/",
     "model_hyperparameter": {
         "caption_embs_size": 64,
         "views_emb_size": 4,
