@@ -12,13 +12,13 @@ class LinearDecayLR(_LRScheduler):
     """
     def __init__(self,
                  optimizer: torch.optim.Optimizer,
-                 lr_i: float = 5e-4,
-                 lr_f: float = 5e-5,
-                 s_n: float = 1e6) -> None:
+                 lr_init: float = 5e-4,
+                 lr_final: float = 5e-5,
+                 step_num: float = 1e6) -> None:
 
-        self.rate = (lr_i - lr_f) / s_n
-        self.lr_i = lr_i
-        self.lr_f = lr_f
+        self.rate = (lr_init - lr_final) / step_num
+        self.lr_i = lr_init
+        self.lr_f = lr_final
 
         super().__init__(optimizer)
 

@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from torch import nn
 
-from transformers import DistilBertModel
+from transformers import DistilBertModel, DistilBertConfig
 
 
 class TextEncoding(nn.Module):
@@ -19,8 +19,13 @@ class TextEncoding(nn.Module):
         """
         super(TextEncoding, self).__init__()
 
-        self.bert_embed = DistilBertModel.from_pretrained(
-            'distilbert-base-uncased')
+        # self.bert_embed = DistilBertModel.from_pretrained(
+        #     'distilbert-base-uncased')
+        configuration = DistilBertConfig()
+        configuration.architectures = "DistilBertModel"
+        configuration.sinusoidal_pos_embds = True
+        configuration.is_encoder_decoder = True
+        self.bert_embed = DistilBertModel(configuration)
         embed_size = 2 * self.bert_embed.config.hidden_size
         self.dropout = nn.Dropout(0.5)
         self.encoder = nn.Sequential(

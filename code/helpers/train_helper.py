@@ -82,7 +82,7 @@ class Trainer():
             self.total_norm = self.total_norm**(1. / 2)
             self.total_norm = self.total_norm / counter
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
         optimizer.step()
         scheduler.step()
 

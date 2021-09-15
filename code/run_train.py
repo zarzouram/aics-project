@@ -117,7 +117,7 @@ def load_model(model_parameters: dict,
     model = SLIM(model_parameters)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr_init)
-    scheduler = LinearDecayLR(optimizer)
+    scheduler = LinearDecayLR(optimizer, **scheduler_param)
     model_data = None
     # Variance scales
     var_scale = VarAnnealer(**configs["var_scale_parm"])

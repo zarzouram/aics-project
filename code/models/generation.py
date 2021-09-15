@@ -12,7 +12,7 @@ from torch import nn
 from torch.distributions.normal import Normal
 # from torch.distributions.bernoulli import Bernoulli
 
-from layers.conv_lstm_conv import ConvLSTMCell
+from layers.conv_lstm_simple import ConvLSTMCell
 """
 The equation numbers on the comments corresponding
 to the relevant equation given in the paper:
@@ -65,7 +65,7 @@ class DRAW(nn.Module):
         # Recurrent encoder/decoder models
         self.encoder = ConvLSTMCell("encode",
                                     img_w // self.scale,
-                                    4 * img_c,
+                                    3 * img_c,
                                     h_size,
                                     kernel_size=19,
                                     stride=7,
@@ -74,14 +74,14 @@ class DRAW(nn.Module):
         self.decoder = ConvLSTMCell("decode",
                                     img_w,
                                     z_size * 2 + cond_size,
-                                    2 * img_c,
+                                    img_c,
                                     kernel_size=19,
                                     stride=7,
                                     padding=2)
 
         # read and write
         self.write_mu = nn.Sequential(
-            nn.Conv2d(2 * img_c,
+            nn.Conv2d(img_c,
                       img_c,
                       kernel_size=3,
                       stride=1,
@@ -89,7 +89,7 @@ class DRAW(nn.Module):
                       dilation=2), nn.GroupNorm(1, img_c))
 
         self.write_log_var = nn.Sequential(
-            nn.Conv2d(2 * img_c,
+            nn.Conv2d(img_c,
                       img_c,
                       kernel_size=3,
                       stride=1,
@@ -120,18 +120,22 @@ class DRAW(nn.Module):
                                                   shape=shape)
 
         (h_dec, c_dec) = self.decoder.init_hidden(batch_size=batch_size,
-                                                  channel_size=2 * self.c,
+                                                  channel_size=self.c,
                                                   shape=(self.h, self.w))
 
         r = x.new_zeros((batch_size, self.c, self.h, self.w), device=device)
 
         kl = 0
         for _ in range(self.T):
+            # img_c = 3
+            # z_size = 64
+            # h_size = 128
+
             # Reconstruction error
             epsilon = x - r  # (B, 3, 64, 64)
 
             # Infer posterior density from hidden state (W//8)
-            # (B, 3+3+6, 64, 64) ==> (B, 128, 8, 8)
+            # (B, 3+3+3, 64, 64) ==> (B, 128, 8, 8)
             h_enc, c_enc = self.encoder(torch.cat([x, epsilon, h_dec], dim=1),
                                         h_enc, c_enc)
 
@@ -140,7 +144,7 @@ class DRAW(nn.Module):
             q_mu, q_log_var = torch.split(self.variational(h_enc),
                                           self.z_size,
                                           dim=1)
-            q_std = torch.exp(q_log_var / 2)
+            q_std = torch.exp(q_log_var)
             q_posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
@@ -151,14 +155,14 @@ class DRAW(nn.Module):
             r_next = self.read(r)
 
             # Send representation through decoder
-            # (B, 64+64+96, 8, 8) ==> (B, 6, 64, 64)
+            # (B, 64+64+96, 8, 8) ==> (B, 3, 64, 64)
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
             h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
                                         h_dec, c_dec)
 
             # write representation
-            # (B, 6, 64, 64) ==> 2 * (B, 3, 64, 64)
+            # (B, 3, 64, 64) ==> (B, 3, 64, 64)
             r_mu = self.write_mu(h_dec)
             r = r + r_mu
 
@@ -168,7 +172,7 @@ class DRAW(nn.Module):
             log_pz = prior.log_prob(z)
             kl += log_qzx - log_pz
 
-        # (B, 6, 64, 64) ==> 2 * (B, 3, 64, 64)
+        # (B, 3, 64, 64) ==> (B, 3, 64, 64)
         r_log_var = self.write_log_var(h_dec).view(batch_size, -1)
 
         # Return the reconstruction and kl
@@ -193,10 +197,8 @@ class DRAW(nn.Module):
         """
         batch_size = x.size(0)
 
-        h_dec = x.new_zeros(
-            (batch_size, self.h_size, self.h // 8, self.w // 8))
-        c_dec = x.new_zeros(
-            (batch_size, self.h_size, self.h // 8, self.w // 8))
+        h_dec = x.new_zeros((batch_size, self.c, self.h, self.w))
+        c_dec = x.new_zeros((batch_size, self.c, self.h, self.w))
 
         r = x.new_zeros((batch_size, self.c, self.h, self.w))
 

@@ -11,7 +11,7 @@
         "file_batch": 1,
         "num_workers": 4
     },
-    "checkpoints_dir": "/scratch/guszarzmo/aicsproject/checkpoints/transf_encr_dec/",
+    "checkpoints_dir": "/scratch/guszarzmo/aicsproject/checkpoints/transf_encr_dec/simplelstm_z128_1e3/",
     "model_hyperparameter": {
         "caption_embs_size": 64,
         "views_emb_size": 4,
@@ -20,14 +20,14 @@
         "image_width": 64,
         "image_height": 64,
         "image_color": 3,
-        "iter_num": 12,
+        "iter_num": 8,
         "draw_h_size": 128,
-        "z_size": 64
+        "z_size": 128
     },
     "scheduler_parm": {
-        "lr_init": 5e-4,
-        "lr_final": 5e-5,
-        "step_num": 1e6
+        "lr_init": 1e-3,
+        "lr_final": 4e-4,
+        "step_num": 2e6
     },
     "var_scale_parm": {
         "init": 2.0,
