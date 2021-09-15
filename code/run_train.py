@@ -21,6 +21,7 @@ from helpers.scheduler import LinearDecayLR, VarAnnealer
 from utils.gpu_cuda_helper import get_gpus_avail
 from utils.visualization import Visualizations
 
+# This is the branch
 seed = 42
 random.seed(seed)
 np.random.seed(seed)
