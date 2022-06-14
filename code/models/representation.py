@@ -4,45 +4,36 @@ from torch import Tensor
 
 
 class RepresentationNetwork(nn.Module):
-    def __init__(self, caption_embs_size: int, viewpoints_size: int,
-                 viewpoints_embs_size: int, r_size: int) -> None:
+
+    def __init__(self, input_size: int, hidden_dim: int,
+                 output_size: int) -> None:
         """
         Parameters
         ----------
-        bert_dir:               string
-                                Bert model absolute directory
-        caption_embs_size:      int
-                                Size of sentence encoding
-        viewpoints_size:        int
-                                Size of camera viwpoints representation
-        viewpoints_embs_size:   int
-                                Size of camera viwpoints encoding
-        r_size:                 int
-                                Size of scene representation (r)
+        rep_input_size:     nt
+                            Size of scene representation input
+        rep_output_size:    int
+                            Size of scene representation output (r)
         """
 
         super(RepresentationNetwork, self).__init__()
 
-        self.viewpoint_encoder = nn.Linear(viewpoints_size,
-                                           viewpoints_embs_size)
-        rep_input_size = caption_embs_size + viewpoints_embs_size
-        self.r_size = r_size
+        self.rep_output_size = output_size
         self.scene_encoder = nn.Sequential(
-            nn.Linear(rep_input_size, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, r_size),
+            nn.Linear(input_size, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, output_size),
         )
 
-    def forward(self, cpt_embs: Tensor, viewpoints: Tensor, n: int) -> Tensor:
+    def forward(self, cpt_embs: Tensor, viewpoints_embd: Tensor) -> Tensor:
 
-        # Encode viewpoints: (B*N, VE)
-        views_encoded = self.viewpoint_encoder(viewpoints)
         # Scene representation
-        scene_vectors = torch.cat((cpt_embs, views_encoded), dim=-1)
-        # Scene embedding  h
+        # (B, N=9, CE+VE)
+        scene_vectors = torch.cat((cpt_embs, viewpoints_embd), dim=-1)
+
+        # Scene embedding  h (B, N=9, SE)
         h = self.scene_encoder(scene_vectors)
+
         # aggregation
-        r = h.view(-1, n, self.r_size).mean(1)
+        r = h.mean(1)  # (B, SE)
         return r

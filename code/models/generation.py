@@ -4,33 +4,26 @@ Ref:
 https://github.com/wohlert/generative-query-network-pytorch/tree/32f32632462d6796ecbc749a6617d3f3c0571b80
 
 """
-import math
 import torch
-# from torch import Tensor
+from torch import Tensor
+
 from torch import nn
-# import torch.nn.functional as F
-from torch.distributions.normal import Normal
-# from torch.distributions.bernoulli import Bernoulli
+from torch.distributions import Normal, kl_divergence
 
 from layers.conv_lstm_simple import ConvLSTMCell
-"""
-The equation numbers on the comments corresponding
-to the relevant equation given in the paper:
-DRAW: A Recurrent Neural Network For Image Generation.
-"""
 
 
 class DRAW(nn.Module):
-    def __init__(
-        self,
-        img_w: int,
-        img_h: int,
-        img_c: int,
-        iter_num: int,
-        h_size: int,
-        z_size: int,
-        cond_size: int,
-    ):
+
+    def __init__(self,
+                 img_w: int,
+                 img_h: int,
+                 img_c: int,
+                 iter_num: int,
+                 h_dim: int,
+                 z_dim: int,
+                 cond_size: int,
+                 init_tunning: bool = False):
         """
         Parameters
         ----------
@@ -42,152 +35,135 @@ class DRAW(nn.Module):
                         image channel
         iter_num:       int
                         Number of time steps
-        h_size:         int
-        z_size:         int
+        h_dim:          int
+        z_dim:          int
                         latent space size
         cond_size:      int
                         The conditioning variable size (r + vwp)
         """
         super(DRAW, self).__init__()
 
-        self.model_param = nn.Parameter(torch.empty(0))
-
         self.h = img_h
         self.w = img_w
         self.x_dims = (img_w, img_h)
         self.c = img_c
-        self.scale = 8
 
-        self.z_size = z_size
-        self.h_size = h_size
+        self.z_dim = z_dim
+        self.h_dim = h_dim
         self.T = iter_num
 
+        self.init_tunning = init_tunning
+
         # Recurrent encoder/decoder models
-        self.encoder = ConvLSTMCell("encode",
-                                    img_w // self.scale,
-                                    3 * img_c,
-                                    h_size,
-                                    kernel_size=19,
-                                    stride=7,
+        self.encoder = ConvLSTMCell(img_c + h_dim,
+                                    h_dim,
+                                    kernel_size=5,
+                                    stride=1,
                                     padding=2)
 
-        self.decoder = ConvLSTMCell("decode",
-                                    img_w,
-                                    z_size * 2 + cond_size,
-                                    img_c,
-                                    kernel_size=19,
-                                    stride=7,
+        self.decoder = ConvLSTMCell(img_c + z_dim + cond_size,
+                                    h_dim,
+                                    kernel_size=5,
+                                    stride=1,
                                     padding=2)
 
-        # read and write
-        self.write_mu = nn.Sequential(
-            nn.Conv2d(img_c,
-                      img_c,
-                      kernel_size=3,
-                      stride=1,
-                      padding=2,
-                      dilation=2), nn.GroupNorm(1, img_c))
+        #
+        self.write = nn.Conv2d(h_dim, 2 * img_c, kernel_size=1, stride=1)
 
-        self.write_log_var = nn.Sequential(
-            nn.Conv2d(img_c,
-                      img_c,
-                      kernel_size=3,
-                      stride=1,
-                      padding=2,
-                      dilation=2), nn.GroupNorm(1, img_c), nn.ReLU())
+        # parameters of distributions
+        self.posterior = nn.Conv2d(h_dim,
+                                   2 * z_dim,
+                                   kernel_size=5,
+                                   stride=1,
+                                   padding=2)
+        self.prior = nn.Conv2d(h_dim,
+                               2 * z_dim,
+                               kernel_size=5,
+                               stride=1,
+                               padding=2)
 
-        self.read = nn.Sequential(
-            nn.Conv2d(img_c, z_size, kernel_size=17, stride=7, padding=1),
-            nn.GroupNorm(1, z_size))
+        self.init_hidden()
 
-        # Outputs parameters of distributions
-        self.variational = nn.Conv2d(h_size,
-                                     2 * z_size,
-                                     kernel_size=5,
-                                     stride=1,
-                                     padding=2)
+    def init_hidden(self):
 
-    def forward(self, x, cond, var_scale):
+        shape = (self.h, self.w)
+        self.h_enc = torch.zeros(1, self.h_size, *shape)
+        self.c_enc = torch.zeros(1, self.h_size, *shape)
+        self.h_dec = torch.zeros(1, self.c, self.h, self.w)
+        self.c_dec = torch.zeros(1, self.c, self.h, self.w)
+
+        if self.init_tunning:
+            self.h_enc = nn.Parameter(self.h_enc, requires_grad=True)
+            self.c_enc = nn.Parameter(self.c_enc, requires_grad=True)
+            self.h_dec = nn.Parameter(self.h_dec, requires_grad=True)
+            self.c_dec = nn.Parameter(self.c_dec, requires_grad=True)
+
+    def forward(self, x: Tensor, cond: Tensor):
         batch_size = x.size(0)
-        device = self.model_param.device
 
+        # img_c = 3
+        # z_dim = 64
+        # h_dim = 128
         # Hidden states initialization
-        # encoder hidden state size = (B, 128, 8, 8)
-        # decoder hidden state size = (B, 3, 64, 64)
-        shape = (self.h // self.scale, self.w // self.scale)
-        (h_enc, c_enc) = self.encoder.init_hidden(batch_size=batch_size,
-                                                  channel_size=self.h_size,
-                                                  shape=shape)
+        # h_enc: encoder hidden state size = (B, 128, 64, 64)
+        # h_dec: decoder hidden state size = (B, 128, 64, 64)
+        h_enc = self.h_enc.repeat(batch_size, 1, 1, 1)
+        c_enc = self.c_enc.repeat(batch_size, 1, 1, 1)
+        h_dec = self.h_enc.repeat(batch_size, 1, 1, 1)
+        c_dec = self.c_dec.repeat(batch_size, 1, 1, 1)
 
-        (h_dec, c_dec) = self.decoder.init_hidden(batch_size=batch_size,
-                                                  channel_size=self.c,
-                                                  shape=(self.h, self.w))
-
-        r = x.new_zeros((batch_size, self.c, self.h, self.w), device=device)
-
+        r = x.new_zeros((batch_size, self.c, self.h, self.w))
         kl = 0
         for _ in range(self.T):
-            # img_c = 3
-            # z_size = 64
-            # h_size = 128
 
             # Reconstruction error
             epsilon = x - r  # (B, 3, 64, 64)
 
             # Infer posterior density from hidden state (W//8)
-            # (B, 3+3+3, 64, 64) ==> (B, 128, 8, 8)
+            # (B, 3+3+128, 64, 64) ==> (B, 128, 64, 64)
             h_enc, c_enc = self.encoder(torch.cat([x, epsilon, h_dec], dim=1),
                                         h_enc, c_enc)
 
+            # Prior
+            p_mu, p_log_var = torch.chunk(self.prior(h_dec), 2, dim=1)
+            p_std = torch.exp(p_log_var * 0.5)
+            p_prior = Normal(p_mu, p_std)
+
             # Posterior distribution
-            # (B, 128, 8, 8) ==> 2*(B, 64, 8, 8)
-            q_mu, q_log_var = torch.split(self.variational(h_enc),
-                                          self.z_size,
-                                          dim=1)
-            q_std = torch.exp(q_log_var)
+            # (B, 128, 64, 64) ==> 2*(B, 64, 64, 64)
+            q_mu, q_log_var = torch.chunk(self.posterior(h_enc), 2, dim=1)
+            q_std = torch.exp(q_log_var * 0.5)
             q_posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
-            # (B, 64, 8, 8)
+            # (B, 64, 64, 64)
             z = q_posterior.rsample()
 
-            # (B, 3, 64, 64) ==> (B, 64, 8, 8)
-            r_next = self.read(r)
-
             # Send representation through decoder
-            # (B, 64+64+96, 8, 8) ==> (B, 3, 64, 64)
+            # cond: (B, CE), CE = x or y
+            #       (B, CE, Zshape)
+            z_shape = z.size()[:-2]
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
-            cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
-            h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
-                                        h_dec, c_dec)
+            cond_ = cond_.contiguous().repeat(1, 1, *z_shape)
+            h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
+                                        c_dec)
 
-            # write representation
-            # (B, 3, 64, 64) ==> (B, 3, 64, 64)
-            r_mu = self.write_mu(h_dec)
-            r = r + r_mu
+            # write output
+            # (B, 128, 64, 64) ==> 2*(B, 3, 64, 64)
+            r_mu, r_log_var = torch.chunk(self.write(h_dec), 2, dim=1)
+            r += r_mu
 
             # KL divergence
-            prior = Normal(torch.zeros_like(q_mu), torch.ones_like(q_std))
-            log_qzx = q_posterior.log_prob(z)
-            log_pz = prior.log_prob(z)
-            kl += log_qzx - log_pz
+            kl += kl_divergence(q_posterior, p_prior)
 
-        # (B, 3, 64, 64) ==> (B, 3, 64, 64)
-        r_log_var = self.write_log_var(h_dec).view(batch_size, -1)
+        x_const = torch.sigmoid(r)
+        r_std = torch.exp(r_log_var * 0.5)
 
-        # Return the reconstruction and kl
-        # Gaussian negative log likelihood loss
-        # source:
-        # https://github.com/pytorch/pytorch/blob/6cdabb2e40a46a49ace66f5d94ed9c48bf6c3372/torch/nn/functional.py#L2597  # noqa:
-        r_var = torch.exp(r_log_var)
-        const = math.log(2 * math.pi)
-        loss_ = ((x - r)**2).view(batch_size, -1)
-        constxn_loss = 0.5 * (
-            (r_log_var + loss_ / r_var).sum(dim=1) + const).mean()
-        kl_loss = torch.sum(kl.view(batch_size, -1), dim=1).mean()
-        loss = kl_loss + constxn_loss
+        # calculate loss
+        nll = -1 * torch.sum(Normal(x_const, r_std).log_prob(x))
+        kl = torch.mean(torch.sum(kl, dim=[1, 2, 3]))
 
-        return r, loss, (kl_loss.item(), constxn_loss.item())
+        return x_const, kl, nll, r_std.detach().mean()
 
     def generate(self, x, cond):
         """
@@ -197,26 +173,26 @@ class DRAW(nn.Module):
         """
         batch_size = x.size(0)
 
-        h_dec = x.new_zeros((batch_size, self.c, self.h, self.w))
-        c_dec = x.new_zeros((batch_size, self.c, self.h, self.w))
-
+        h_dec = self.h_dec.repeat(batch_size, 1, 1, 1)
+        c_dec = self.c_dec.repeat(batch_size, 1, 1, 1)
         r = x.new_zeros((batch_size, self.c, self.h, self.w))
 
         for _ in range(self.T):
-            z = torch.randn(batch_size,
-                            self.z_size,
-                            self.h // 8,
-                            self.w // 8,
-                            device=x.device)
+            # z = torch.randn(batch_size,
+            #                 self.z_dim,
+            #                 self.h,
+            #                 self.w,
+            #                 device=x.device)
+            p_mu, p_log_var = torch.chunk(self.prior(h_dec), 2, dim=1)
+            p_std = torch.exp(p_log_var * 0.5)
+            z = Normal(p_mu, p_std).sample()
 
-            r_next = self.read(r)
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
-            cond_ = cond_.contiguous().repeat(1, 1, self.h // 8, self.w // 8)
+            cond_ = cond_.contiguous().repeat(1, 1, self.h, self.w)
+            h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
+                                        c_dec)
 
-            h_dec, c_dec = self.decoder(torch.cat([z, r_next, cond_], dim=1),
-                                        h_dec, c_dec)
+            r_mu, _ = torch.chunk(self.write(h_dec), 2, dim=1)
+            r += r_mu
 
-            r_ = self.write_mu(h_dec)
-            r = r + r_
-
-        return r
+        return torch.sigmoid(r)

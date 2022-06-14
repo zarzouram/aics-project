@@ -1,6 +1,6 @@
 """
 Modified from
-https://github.com/rnagumo/gqnlib/blob/master/gqnlib/slim_dataset.py
+https://github.com/deepmind/slim-dataset/blob/master/reader.py#L60-L84
 """
 """Convert slim tfrecords to pt.gz files.
 
@@ -23,37 +23,137 @@ meta_obj_rotations, meta_obj_colors)`.
 ref)
 https://github.com/deepmind/slim-dataset/blob/master/reader.py
 """
-from typing import List
+from typing import Dict
+
 import argparse
 import logging
-import time
-import functools
-import gzip
-import multiprocessing as mp
 import os
 import pathlib
+
+import re
+from tqdm import tqdm
+# from tqdm.contrib.concurrent import process_map
+# from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import current_thread
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 
 import torch
 
 import numpy as np
-from tokenizer import BertPreprocessing
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
-_IMAGE_SCALE = 0.5
+_IMAGE_SCALE = 0.25
 _USE_SIMPLIFIED_CAPTIONS = False
 _PARSE_METADATA = True
 logging.getLogger('tensorflow').disabled = True
 
 
-def calculate_time(start_time, end_time):
-    time = end_time - start_time
-    hours = int(time // 3600)
-    time = time - 3600 * hours
-    mins = int(time // 60)
-    secs = int(time - (mins * 60))
-    return hours, mins, secs
+class TfDataset(object):
+
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.images = [None]
+        if dataset == "turk":
+            self.views = [None]
+            self.texts = [None]
+            self.tokens = [None]
+
+    def convert_tf_file(self, tf_file_path, idx=None):
+        """Main process for one tfrecord file.
+
+        Args:
+            dataset:  TFRecords Dataset
+        """
+        # Preprocess for each data
+        thread, w_id = current_thread().name.split("_")
+        thread_id = thread.split("-")[-1]
+        position = int(w_id) + int(thread_id) + 1
+
+        records = list(
+            tf.data.TFRecordDataset(str(tf_file_path)).map(self.parse))
+        length = len(records)
+
+        for record in tqdm(records,
+                           total=length,
+                           desc="process files",
+                           unit="record",
+                           position=position,
+                           leave=False):
+
+            scene_data = preprocess_data(record)
+            self.images.append(scene_data[0])
+            if self.dataset == "turk":
+                self.views.append(scene_data[1])
+                self.texts.append(scene_data[2])
+                self.tokens.append(scene_data[3])
+
+        return idx
+
+    def parse(self, buf: tf.Tensor) -> dict:
+        """Parse binary protocol buffer into tensors.
+
+        The protocol    buffer is expected to contain the following fields:
+            * frames:   10 views of the scene rendered as images.
+            * cameras:  10 vectors describing the camera position from which
+                        the frames have been rendered
+            * captions: A string description of the scene. For the natural
+                        language dataset, contains descriptions written by
+                        human annotators. For synthetic data contains a string
+                        describing each relation  between objects in the scene
+                        exactly once.
+            * OTHERS:   Other fields are in the buffer. For more info see:
+                        https://github.com/deepmind/slim-dataset/blob/0022ab07c692a630afe5144d8d369d29d7e97172/reader.py#L60-L84
+
+        Args:
+            buf: A string containing the serialized protocol buffer.
+
+        Returns:
+            A dictionary containing tensors for the frames fields. The
+            dictionary will contain cameras and captions if the buffer is
+            belong to the turk dataset.
+        """
+
+        feature_map = {
+            "frames": tf.io.FixedLenFeature(shape=[_NUM_VIEWS],
+                                            dtype=tf.string)
+        }
+
+        example = tf.io.parse_single_example(buf, feature_map)
+
+        images = tf.concat(example["frames"], axis=0)
+        images = tf.nest.map_structure(
+            tf.stop_gradient,
+            tf.map_fn(tf.image.decode_jpeg,
+                      tf.reshape(images, [-1]),
+                      dtype=tf.uint8))
+
+        data_tensors = {"images": images}
+
+        if self.dataset == "turk":
+            feature_map = {
+                "cameras":
+                tf.io.FixedLenFeature(
+                    shape=[_NUM_VIEWS * _NUM_RAW_CAMERA_PARAMS],
+                    dtype=tf.float32),
+                "captions":
+                tf.io.VarLenFeature(dtype=tf.string)
+            }
+
+            example = tf.io.parse_single_example(buf, feature_map)
+
+            cameras = tf.reshape(example["cameras"],
+                                 shape=[-1, _NUM_RAW_CAMERA_PARAMS])
+            captions = tf.sparse.to_dense(example["captions"],
+                                          default_value="")
+
+            data_tensors["cameras"] = cameras
+            data_tensors["captions"] = captions
+
+        return data_tensors
 
 
 def np_to_list_str(str_byte_array):
@@ -65,220 +165,40 @@ def np_to_list_str(str_byte_array):
     return list_str
 
 
-def convert_record(path: pathlib.Path, save_dir: pathlib.Path, batch_size: int,
-                   first_n: int) -> None:
-    """Main process for one tfrecord file.
-
-    This method load one tfrecord file, and preprocess each (frames, cameras,
-    captions). The maximum number of processed (frames, cameras,
-    captions) are bounded by `batch_size`.
-
-    Args:
-        path:           pathlib.Path
-                        Path to original data.
-        save_dir:       pathlib.Path
-                        Path to saved data.
-        batch_size:     int
-                        Batch size of dataset for each tfrecord.
-        first_n:        int
-                        Number of data to read (-1 means all).
-    """
-
-    # Load tfrecord
-    dataset = tf.data.TFRecordDataset(str(path))
-
-    # Preprocess for each data
-    images_list = []
-    views_list = []
-    captions_text = []
-    batch = 1
-    for i, raw_data in enumerate(dataset.take(first_n)):
-        # image, views, texts, captions = preprocess_data(raw_data)
-        image, views, texts = preprocess_data(raw_data)
-        images_list.append(image)
-        views_list.append(views)
-        captions_text.append(texts)
-
-        # Save batch to a gzip file
-        if (i + 1) % batch_size == 0:
-            images = torch.squeeze(torch.stack(images_list))
-            views = torch.squeeze(torch.stack(views_list))
-
-            captions_text = np.squeeze(captions_text)
-            captions_text_ = np_to_list_str(captions_text)  # type: List[str]
-            tokens_data = tokenizer.tokenize(captions_text_)
-            tokens_id = tokens_data["input_ids"].view(batch_size, 10, -1)
-            attention_mask = tokens_data["attention_mask"].view(
-                batch_size, 10, -1)
-
-            scene_list = [
-                images, views, captions_text_, tokens_id, attention_mask
-            ]
-
-            save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
-            with gzip.open(str(save_path), "wb") as f:
-                torch.save(scene_list, f)
-
-            images_list = []
-            views_list = []
-            captions_text = []
-            scene_list = []
-            batch += 1
-    else:
-        # Save rest
-        if images_list:
-            images = torch.squeeze(torch.stack(images_list))
-            views = torch.squeeze(torch.stack(views_list))
-            # captions_text = np.squeeze(captions_text)
-
-            captions_text = np.squeeze(captions_text)
-            captions_text_ = np_to_list_str(captions_text)  # type: List[str]
-            tokens_data = tokenizer.tokenize(captions_text_)
-            mysize = images.size(0)
-            tokens_id = tokens_data["input_ids"].view(mysize, 10, -1)
-            attention_mask = tokens_data["attention_mask"].view(mysize, 10, -1)
-
-            scene_list = [
-                images, views, captions_text_, tokens_id, attention_mask
-            ]
-
-            save_path = save_dir / f"{path.stem}-{batch}.pt.gz"
-            with gzip.open(str(save_path), "wb") as f:
-                torch.save(scene_list, f)
+def tokenize(text):
+    return [token for token in re.split(r"(\W)", text) if token.strip()]
 
 
-def preprocess_data(raw_data: tf.Tensor) -> tuple:
+def preprocess_data(tensor_dict: Dict[str, tf.Tensor]) -> tuple:
     """Converts raw data to tensor and saves into torch gziped file.
 
     Args:
         raw_data (tf.Tensor): Buffer.
     """
 
-    tensor_dict = _parse_proto(raw_data)
-
     # Preprocess
+
+    # Frames size: (10, 32, 32, 3) ==> (10, 32, 32, 3)
     frames = _preprocess_images(tensor_dict["images"]).numpy()
-    cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
-    captions = tensor_dict["captions"].numpy()
-
-    # Frames size: (10, 64, 64, 3) ==change==> (10, 64, 64, 3)
-    # cameras size: (10, 4).
     frames = frames.transpose(0, 3, 1, 2)
-
     frames = torch.from_numpy(frames)
-    cameras = torch.from_numpy(cameras)
-    returned_values = (frames, cameras, captions)
+
+    if "cameras" in tensor_dict:
+        # cameras size: (10) "in rad"
+        cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
+        cameras = torch.round(torch.from_numpy(cameras), decimals=3)
+
+        # convert np array of bytes to list of str
+        # captions size: (B)
+        captions = tensor_dict["captions"].numpy()
+        texts = np_to_list_str(captions)
+        tokens = [tokenize(t.lower()) for t in texts]  # tokenize
+
+        returned_values = (frames, cameras, texts, tokens)
+    else:
+        returned_values = (frames, None, None, None)
+
     return returned_values
-
-
-def _parse_proto(buf: tf.Tensor) -> dict:
-    """Parse binary protocol buffer into tensors.
-
-    The protocol buffer is expected to contain the following fields:
-
-        * frames: 10 views of the scene rendered as images.
-        * top_down_frame: single view of the scene from above rendered as an
-            image.
-        * cameras: 10 vectors describing the camera position from which the
-            frames have been rendered
-        * captions: A string description of the scene. For the natural language
-            dataset, contains descriptions written by human annotators. For
-            synthetic data contains a string describing each relation between
-            objects in the scene exactly once.
-        * simplified_captions: A string description of the scene. For the
-            natural language dataset contains a string describing each relation
-            between objects in the scene exactly once. For synthetic datasets
-            contains a string describing every possible pairwise relation
-            between objects in the scene.
-        * meta_shape: A vector of strings describing the object shapes.
-        * meta_color: A vector of strings describing the object colors.
-        * meta_size: A vector of strings describing the object sizes.
-        * meta_obj_positions: A matrix of floats describing the position of
-            each object in the scene.
-        * meta_obj_rotations: A matrix of floats describing the rotation of
-            each object in the scene.
-        * meta_obj_rotations: A matrix of floats describing the color of each
-            object in the scene as RGBA in the range [0, 1].
-
-    Args:
-        buf: A string containing the serialized protocol buffer.
-
-    Returns:
-        A dictionary containing tensors for each of the fields in the protocol
-        buffer. If _PARSE_METADATA is False, will omit fields starting with
-        'meta_'.
-    """
-
-    feature_map = {
-        "frames":
-        tf.io.FixedLenFeature(shape=[_NUM_VIEWS], dtype=tf.string),
-        # "top_down_frame":
-        # tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
-        "cameras":
-        tf.io.FixedLenFeature(shape=[_NUM_VIEWS * _NUM_RAW_CAMERA_PARAMS],
-                              dtype=tf.float32),
-        "captions":
-        tf.io.VarLenFeature(dtype=tf.string),
-        # "simplified_captions":
-        # tf.io.VarLenFeature(dtype=tf.string),
-        # "meta_shape":
-        # tf.io.VarLenFeature(dtype=tf.string),
-        # "meta_color":
-        # tf.io.VarLenFeature(dtype=tf.string),
-        # "meta_size":
-        # tf.io.VarLenFeature(dtype=tf.string),
-        # "meta_obj_positions":
-        # tf.io.VarLenFeature(dtype=tf.float32),
-        # "meta_obj_rotations":
-        # tf.io.VarLenFeature(dtype=tf.float32),
-        # "meta_obj_colors":
-        # tf.io.VarLenFeature(dtype=tf.float32),
-    }
-
-    example = tf.io.parse_single_example(buf, feature_map)
-    images = tf.concat(example["frames"], axis=0)
-    images = tf.nest.map_structure(
-        tf.stop_gradient,
-        tf.map_fn(tf.image.decode_jpeg,
-                  tf.reshape(images, [-1]),
-                  dtype=tf.uint8))
-    # top_down = tf.image.decode_jpeg(tf.squeeze(example["top_down_frame"]))
-    cameras = tf.reshape(example["cameras"],
-                         shape=[-1, _NUM_RAW_CAMERA_PARAMS])
-    captions = tf.sparse.to_dense(example["captions"], default_value="")
-    # simplified_captions = tf.sparse.to_dense(example["simplified_captions"],
-    #                                          default_value="")
-    # meta_shape = tf.sparse.to_dense(example["meta_shape"], default_value="")
-    # meta_color = tf.sparse.to_dense(example["meta_color"], default_value="")
-    # meta_size = tf.sparse.to_dense(example["meta_size"], default_value="")
-    # meta_obj_positions = tf.sparse.to_dense(example["meta_obj_positions"],
-    #                                         default_value=0)
-    # meta_obj_positions = tf.reshape(meta_obj_positions, shape=[-1, 3])
-    # meta_obj_rotations = tf.sparse.to_dense(example["meta_obj_rotations"],
-    #                                         default_value=0)
-    # meta_obj_rotations = tf.reshape(meta_obj_rotations, shape=[-1, 4])
-    # meta_obj_colors = tf.sparse.to_dense(example["meta_obj_colors"],
-    #                                      default_value=0)
-    # meta_obj_colors = tf.reshape(meta_obj_colors, shape=[-1, 4])
-
-    data_tensors = {
-        "images": images,
-        "cameras": cameras,
-        "captions": captions,
-        # "simplified_captions": simplified_captions,
-        # "top_down": top_down
-    }
-    # if _PARSE_METADATA:
-    #     data_tensors.update({
-    #         "meta_shape": meta_shape,
-    #         "meta_color": meta_color,
-    #         "meta_size": meta_size,
-    #         "meta_obj_positions": meta_obj_positions,
-    #         "meta_obj_rotations": meta_obj_rotations,
-    #         "meta_obj_colors": meta_obj_colors
-    #     })
-
-    return data_tensors
 
 
 def _convert_and_resize_images(images: tf.Tensor,
@@ -288,7 +208,7 @@ def _convert_and_resize_images(images: tf.Tensor,
     images = tf.image.convert_image_dtype(images, dtype=tf.float32)
     new_size = tf.cast(old_size, tf.float32) * _IMAGE_SCALE
     new_size = tf.cast(new_size, tf.int32)
-    images = tf.image.resize(images, new_size)
+    images = tf.image.resize(images, new_size, preserve_aspect_ratio=True)
     return images
 
 
@@ -298,92 +218,76 @@ def _preprocess_images(images: tf.Tensor) -> tf.Tensor:
     return images
 
 
-def _preprocess_topdown(td_image: tf.Tensor) -> tf.Tensor:
-    old_size = tf.shape(td_image)[0:2]
-    td_image = _convert_and_resize_images(td_image, old_size)
-    return td_image
-
-
 def _preprocess_cameras(raw_cameras: tf.Tensor) -> tf.Tensor:
     azimuth = raw_cameras[:, 0]
-    pos = raw_cameras[:, 1:]
-    cameras = tf.concat([
-        pos,
-        tf.expand_dims(tf.sin(azimuth), -1),
-        tf.expand_dims(tf.cos(azimuth), -1),
-    ],
-                        axis=1)
-    return cameras
+    # pos = raw_cameras[:, 1:]
+    # cameras = tf.concat([
+    #     pos,
+    #     tf.expand_dims(tf.sin(azimuth), -1),
+    #     tf.expand_dims(tf.cos(azimuth), -1),
+    # ],
+    #                     axis=1)
+    return azimuth
 
 
-def main():
-    # Specify dataset name
-    parser = argparse.ArgumentParser(description="Convert tfrecord to torch")
-    parser.add_argument("--dataset_path",
-                        type=str,
-                        default="~/resources/slim",
-                        help="Dataset path.")
+def get_data(dataset_path, dataset, mode):
 
-    parser.add_argument("--dataset",
-                        type=str,
-                        default="turk_data",
-                        help="Dataset name.")
-
-    parser.add_argument("--mode",
-                        type=str,
-                        default="train",
-                        help="Mode {train, test, valid}")
-
-    parser.add_argument("--batch-size",
-                        type=int,
-                        default=10,
-                        help="Batch size of tfrecords.")
-
-    parser.add_argument("--first-n",
-                        type=int,
-                        default=10,
-                        help="Read only first n data in single a record "
-                        "(-1 means all data).")
-    args = parser.parse_args()
-
-    # Path
-    dataset_path = os.path.expanduser(args.dataset_path)
-    tf_dir = pathlib.Path(f"{dataset_path}/{args.dataset}/{args.mode}/")
-    dataset_parent_path = pathlib.Path(f"{dataset_path}").parent
-    torch_dir = pathlib.Path(
-        f"{dataset_parent_path}/{args.dataset}_torch/{args.mode}/")
-
-    torch_dir.mkdir(parents=True, exist_ok=True)
-
+    # Setting some paths
+    print("Reading dataset...")
+    dataset_path = os.path.expanduser(dataset_path)
+    tf_dir = pathlib.Path(f"{dataset_path}/{dataset}/{mode}/")
     if not tf_dir.exists():
         raise FileNotFoundError(f"TFRecord path `{tf_dir}` does not exists.")
 
+    # make dir to save data if not exist
+    dataset_parent_path = pathlib.Path(f"{dataset_path}").parent
+    torch_dir = pathlib.Path(f"{dataset_parent_path}/{dataset}_torch/{mode}/")
+    torch_dir.mkdir(parents=True, exist_ok=True)
+
     # File list of original dataset
-    record_list = sorted(tf_dir.glob("*.tfrecord"))
+    tf_files_path = sorted(tf_dir.glob("*.tfrecord"))
+    tfdataset = TfDataset(dataset)  # construct tfdataset
 
-    global tokenizer
-    tokenizer = BertPreprocessing()
+    # Read tfdataset file by file and process the records
+    num_workers = 1 if dataset == "turk" else 10
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        with tqdm(total=len(tf_files_path)) as pbar:
+            pbar.desc = f"Preparing {mode} Dataset"
+            pbar.unit = "tf_file"
+            futures = []
+            for idx, tf_file_path in enumerate(tf_files_path):
+                i = executor.submit(tfdataset.convert_tf_file, tf_file_path,
+                                    idx)
+                futures.append(i)
+            for _ in as_completed(futures):
+                pbar.update(1)
 
-    num_proc = mp.cpu_count()
-
-    start_time = time.time()
-    with mp.Pool(processes=num_proc) as pool:
-        f = functools.partial(convert_record,
-                              save_dir=torch_dir,
-                              batch_size=args.batch_size,
-                              first_n=args.first_n)
-        pool.map(f, record_list)
-
-    end_time = time.time()
-    hr, mins, secs = calculate_time(start_time, end_time)
-    print("\n\n")
-    print("=" * 100)
-    print(f"\n\nProcess data finished. ET:{hr:2d}:{mins:2d}:{secs:2d}\n\n")
-    print("----" * 20)
+    return tfdataset
 
 
 if __name__ == "__main__":
     # tf.enable_eager_execution()
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-    main()
+    # Specify dataset name
+    parser = argparse.ArgumentParser(description="Convert tfrecord to torch")
+    parser.add_argument("--dataset_path",
+                        type=str,
+                        default="/srv/data/zarzouram/lt2318/slim/original/",
+                        help="Dataset path.")
+
+    parser.add_argument("--dataset",
+                        type=str,
+                        default="turk",
+                        help="Dataset name {turk, synth}.")
+
+    parser.add_argument("--mode",
+                        type=str,
+                        default="train",
+                        help="Mode {train, test, valid}")
+
+    args = parser.parse_args()
+
+    ds = get_data(args.dataset_path, args.dataset, args.mode)
+
+    print("Done")
