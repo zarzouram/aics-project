@@ -34,8 +34,8 @@ import re
 from tqdm import tqdm
 # from tqdm.contrib.concurrent import process_map
 # from multiprocessing import Pool
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import current_thread
+from concurrent.futures import ThreadPoolExecutor
+from threading import current_thread, Lock
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
@@ -54,44 +54,88 @@ logging.getLogger('tensorflow').disabled = True
 
 class TfDataset(object):
 
-    def __init__(self, dataset):
+    def __init__(self, dataset, split, tf_files_path):
         self.dataset = dataset
-        self.images = [None]
-        if dataset == "turk":
-            self.views = [None]
-            self.texts = [None]
-            self.tokens = [None]
+        self.split = split
+        self.file_paths = tf_files_path
 
-    def convert_tf_file(self, tf_file_path, idx=None):
+        self.images = []
+        if dataset == "turk":
+            self.views = []
+            self.texts = []
+            self.tokens = []
+
+    def run_process(self):
+        num_workers = 1 if self.dataset == "turk" else 30
+        lock = Lock()
+        self.main_pb = tqdm(total=len(self.file_paths),
+                            desc=f"Preparing {self.split} Dataset",
+                            unit="tf_file")
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            for idx, file_path in enumerate(self.file_paths):
+                future = executor.submit(self.convert_tf_file,
+                                         file_path, idx, lock)
+                future.add_done_callback(self.done_callback)
+
+        self.main_pb.close()
+
+    def done_callback(self, future):
+        self.main_pb.update(1)
+
+    def convert_tf_file(self, tf_file_path, idx=None, lock=None):
         """Main process for one tfrecord file.
 
         Args:
             dataset:  TFRecords Dataset
         """
+
         # Preprocess for each data
+        # read tfdataset file, return list of records
+        records = list(
+            tf.data.TFRecordDataset(str(tf_file_path)).map(self.parse))
+
+        # progress bar
+        position = self.get_bar_position()
+        tffile_name = tf_file_path.name
+        length = len(records)
+        with lock:
+            records_pb = tqdm(total=length,
+                              desc=f"process {tffile_name:13s}",
+                              unit="record",
+                              position=position,
+                              leave=False)
+
+        # process records
+        scene_images = []
+        scene_views = []
+        scene_texts = []
+        scene_tokens = []
+        for record in records:
+            scene_data = preprocess_data(record)
+            scene_images.append(scene_data[0])
+            if self.dataset == "turk":
+                scene_views.append(scene_data[1])
+                scene_texts.append(scene_data[2])
+                scene_tokens.append(scene_data[3])
+            with lock:
+                records_pb.update(1)
+
+        # save outputs
+        with lock:
+            self.images.extend(scene_images)
+            if self.dataset == "turk":
+                self.views.extend(scene_views)
+                self.texts.extend(scene_texts)
+                self.tokens.extend(scene_tokens)
+
+        return idx
+
+    def get_bar_position(self):
         thread, w_id = current_thread().name.split("_")
         thread_id = thread.split("-")[-1]
         position = int(w_id) + int(thread_id) + 1
 
-        records = list(
-            tf.data.TFRecordDataset(str(tf_file_path)).map(self.parse))
-        length = len(records)
-
-        for record in tqdm(records,
-                           total=length,
-                           desc="process files",
-                           unit="record",
-                           position=position,
-                           leave=False):
-
-            scene_data = preprocess_data(record)
-            self.images.append(scene_data[0])
-            if self.dataset == "turk":
-                self.views.append(scene_data[1])
-                self.texts.append(scene_data[2])
-                self.tokens.append(scene_data[3])
-
-        return idx
+        return position
 
     def parse(self, buf: tf.Tensor) -> dict:
         """Parse binary protocol buffer into tensors.
@@ -246,21 +290,8 @@ def get_data(dataset_path, dataset, mode):
 
     # File list of original dataset
     tf_files_path = sorted(tf_dir.glob("*.tfrecord"))
-    tfdataset = TfDataset(dataset)  # construct tfdataset
-
-    # Read tfdataset file by file and process the records
-    num_workers = 1 if dataset == "turk" else 10
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        with tqdm(total=len(tf_files_path)) as pbar:
-            pbar.desc = f"Preparing {mode} Dataset"
-            pbar.unit = "tf_file"
-            futures = []
-            for idx, tf_file_path in enumerate(tf_files_path):
-                i = executor.submit(tfdataset.convert_tf_file, tf_file_path,
-                                    idx)
-                futures.append(i)
-            for _ in as_completed(futures):
-                pbar.update(1)
+    tfdataset = TfDataset(dataset, mode, tf_files_path)  # construct tfdataset
+    tfdataset.run_process()  # process dataset
 
     return tfdataset
 
