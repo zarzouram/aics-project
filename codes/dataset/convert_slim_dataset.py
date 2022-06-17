@@ -25,30 +25,27 @@ https://github.com/deepmind/slim-dataset/blob/master/reader.py
 """
 from typing import Dict
 
-import argparse
 import logging
+import argparse
 import os
 import pathlib
+from tqdm import tqdm
 
 import re
-from tqdm import tqdm
-# from tqdm.contrib.concurrent import process_map
-# from multiprocessing import Pool
+from collections import Counter, OrderedDict
+from itertools import chain
+import h5py
+
 from concurrent.futures import ThreadPoolExecutor
 from threading import current_thread, Lock
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import tensorflow as tf
-
-import torch
-
 import numpy as np
+import tensorflow as tf
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
 _IMAGE_SCALE = 0.25
-_USE_SIMPLIFIED_CAPTIONS = False
-_PARSE_METADATA = True
 logging.getLogger('tensorflow').disabled = True
 
 
@@ -60,8 +57,8 @@ class TfDataset(object):
         self.file_paths = tf_files_path
 
         self.images = []
+        self.views = []
         if dataset == "turk":
-            self.views = []
             self.texts = []
             self.tokens = []
 
@@ -73,8 +70,8 @@ class TfDataset(object):
                             unit="tf_file")
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             for idx, file_path in enumerate(self.file_paths):
-                future = executor.submit(self.convert_tf_file,
-                                         file_path, idx, lock)
+                future = executor.submit(self.convert_tf_file, file_path, idx,
+                                         lock)
                 future.add_done_callback(self.done_callback)
 
         self.main_pb.close()
@@ -113,8 +110,8 @@ class TfDataset(object):
         for record in records:
             scene_data = preprocess_data(record)
             scene_images.append(scene_data[0])
+            scene_views.append(scene_data[1])
             if self.dataset == "turk":
-                scene_views.append(scene_data[1])
                 scene_texts.append(scene_data[2])
                 scene_tokens.append(scene_data[3])
             with lock:
@@ -123,8 +120,8 @@ class TfDataset(object):
         # save outputs
         with lock:
             self.images.extend(scene_images)
+            self.views.extend(scene_views)
             if self.dataset == "turk":
-                self.views.extend(scene_views)
                 self.texts.extend(scene_texts)
                 self.tokens.extend(scene_tokens)
 
@@ -162,8 +159,11 @@ class TfDataset(object):
         """
 
         feature_map = {
-            "frames": tf.io.FixedLenFeature(shape=[_NUM_VIEWS],
-                                            dtype=tf.string)
+            "frames":
+            tf.io.FixedLenFeature(shape=[_NUM_VIEWS], dtype=tf.string),
+            "cameras":
+            tf.io.FixedLenFeature(shape=[_NUM_VIEWS * _NUM_RAW_CAMERA_PARAMS],
+                                  dtype=tf.float32)
         }
 
         example = tf.io.parse_single_example(buf, feature_map)
@@ -175,26 +175,18 @@ class TfDataset(object):
                       tf.reshape(images, [-1]),
                       dtype=tf.uint8))
 
-        data_tensors = {"images": images}
+        cameras = tf.reshape(example["cameras"],
+                             shape=[-1, _NUM_RAW_CAMERA_PARAMS])
+
+        data_tensors = {"images": images, "cameras": cameras}
 
         if self.dataset == "turk":
-            feature_map = {
-                "cameras":
-                tf.io.FixedLenFeature(
-                    shape=[_NUM_VIEWS * _NUM_RAW_CAMERA_PARAMS],
-                    dtype=tf.float32),
-                "captions":
-                tf.io.VarLenFeature(dtype=tf.string)
-            }
+            feature_map = {"captions": tf.io.VarLenFeature(dtype=tf.string)}
 
             example = tf.io.parse_single_example(buf, feature_map)
-
-            cameras = tf.reshape(example["cameras"],
-                                 shape=[-1, _NUM_RAW_CAMERA_PARAMS])
             captions = tf.sparse.to_dense(example["captions"],
                                           default_value="")
 
-            data_tensors["cameras"] = cameras
             data_tensors["captions"] = captions
 
         return data_tensors
@@ -210,7 +202,8 @@ def np_to_list_str(str_byte_array):
 
 
 def tokenize(text):
-    return [token for token in re.split(r"(\W)", text) if token.strip()]
+    return [token
+            for token in re.split(r"(\W)", text) if token.strip()] + ["<eos>"]
 
 
 def preprocess_data(tensor_dict: Dict[str, tf.Tensor]) -> tuple:
@@ -225,13 +218,11 @@ def preprocess_data(tensor_dict: Dict[str, tf.Tensor]) -> tuple:
     # Frames size: (10, 32, 32, 3) ==> (10, 32, 32, 3)
     frames = _preprocess_images(tensor_dict["images"]).numpy()
     frames = frames.transpose(0, 3, 1, 2)
-    frames = torch.from_numpy(frames)
 
-    if "cameras" in tensor_dict:
-        # cameras size: (10) "in rad"
-        cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
-        cameras = torch.round(torch.from_numpy(cameras), decimals=3)
+    # cameras size: (10)
+    cameras = _preprocess_cameras(tensor_dict["cameras"]).numpy()
 
+    if "captions" in tensor_dict:
         # convert np array of bytes to list of str
         # captions size: (B)
         captions = tensor_dict["captions"].numpy()
@@ -240,7 +231,7 @@ def preprocess_data(tensor_dict: Dict[str, tf.Tensor]) -> tuple:
 
         returned_values = (frames, cameras, texts, tokens)
     else:
-        returned_values = (frames, None, None, None)
+        returned_values = (frames, cameras, None, None)
 
     return returned_values
 
@@ -265,29 +256,18 @@ def _preprocess_images(images: tf.Tensor) -> tf.Tensor:
 def _preprocess_cameras(raw_cameras: tf.Tensor) -> tf.Tensor:
     azimuth = raw_cameras[:, 0]
     # pos = raw_cameras[:, 1:]
-    # cameras = tf.concat([
-    #     pos,
-    #     tf.expand_dims(tf.sin(azimuth), -1),
-    #     tf.expand_dims(tf.cos(azimuth), -1),
-    # ],
-    #                     axis=1)
-    return azimuth
+    cameras = tf.concat([
+        tf.expand_dims(tf.cos(azimuth), -1),
+        tf.expand_dims(tf.sin(azimuth), -1)
+    ],
+                        axis=1)
+    return cameras
 
 
-def get_data(dataset_path, dataset, mode):
+def get_data(tf_dir, dataset, mode):
 
     # Setting some paths
     print("Reading dataset...")
-    dataset_path = os.path.expanduser(dataset_path)
-    tf_dir = pathlib.Path(f"{dataset_path}/{dataset}/{mode}/")
-    if not tf_dir.exists():
-        raise FileNotFoundError(f"TFRecord path `{tf_dir}` does not exists.")
-
-    # make dir to save data if not exist
-    dataset_parent_path = pathlib.Path(f"{dataset_path}").parent
-    torch_dir = pathlib.Path(f"{dataset_parent_path}/{dataset}_torch/{mode}/")
-    torch_dir.mkdir(parents=True, exist_ok=True)
-
     # File list of original dataset
     tf_files_path = sorted(tf_dir.glob("*.tfrecord"))
     tfdataset = TfDataset(dataset, mode, tf_files_path)  # construct tfdataset
@@ -314,11 +294,62 @@ if __name__ == "__main__":
 
     parser.add_argument("--mode",
                         type=str,
-                        default="train",
+                        default="test",
                         help="Mode {train, test, valid}")
+
+    parser.add_argument(
+        "--min_freq",
+        type=int,
+        default=3,
+        help="minimum frequency needed to include a token in the vocabulary")
 
     args = parser.parse_args()
 
-    ds = get_data(args.dataset_path, args.dataset, args.mode)
+    # Pathes
+    dataset_path = args.dataset_path
+    dataset = args.dataset
+    mode = args.mode
+
+    dataset_path = os.path.expanduser(dataset_path)
+    tf_dir = pathlib.Path(f"{dataset_path}/{dataset}/{mode}/")
+    if not tf_dir.exists():
+        raise FileNotFoundError(f"TFRecord path `{tf_dir}` does not exists.")
+
+    # make dir to save data if not exist
+    dataset_parent_path = pathlib.Path(f"{dataset_path}").parent
+    torch_dir = pathlib.Path(f"{dataset_parent_path}/{dataset}_torch/{mode}/")
+    torch_dir.mkdir(parents=True, exist_ok=True)
+
+    # get dataset
+    ds = get_data(tf_dir, dataset, mode)
+    images = np.stack(ds.images)
+    cameras = np.stack(ds.views)
+
+    if args.dataset == "turk":
+        # build vocab
+        words = list(chain.from_iterable(chain.from_iterable(ds.tokens)))
+        bow = Counter(words)
+        bow_dict = OrderedDict(bow.most_common())
+
+    # save images
+    print("writing data to the desk...")
+    with h5py.File(str(torch_dir / "images.hdf5"), "w") as h5f:
+        images_ds = h5f.create_group("images")
+        images_ds.create_dataset(name=f"{dataset}_{mode}",
+                                 data=images,
+                                 shape=images.shape,
+                                 dtype=images.dtype,
+                                 compression="gzip",
+                                 compression_opts=9)
+
+        cameras_ds = h5f.create_group("cameras")
+        cameras_ds.create_dataset(name=f"{dataset}_{mode}",
+                                  data=cameras,
+                                  shape=cameras.shape,
+                                  dtype=cameras.dtype,
+                                  compression="gzip",
+                                  compression_opts=9)
+
+    print("writing finished.")
 
     print("Done")

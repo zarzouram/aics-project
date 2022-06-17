@@ -30,10 +30,7 @@ class SLIM(nn.Module):
         assert x1 or x2, "You can pretain only one module at a time"  # noqa" E5011
 
         vwp_size = param["vwp_size"]  # camera angle
-        vwp_embd_sz = param["vwp_embd_sz"]  # camera angel embedder output size
-
-        self.viewpoint_embeddings = nn.Linear(vwp_size, vwp_embd_sz)
-
+        vwp_embd_sz = param["vwp_embd_sz"]  # angel encoder output size
         if not pretrain_draw:
             vocab_size = param["vocab_size"]
             cptn_embs_sz = param["cptn_embs_sz"]  # caption text embedding size
@@ -47,6 +44,7 @@ class SLIM(nn.Module):
                 scnr_hidden_dim = param["scnr_hidden_dim"]  # scene rep. hidden
                 input_size = cptn_embs_sz + vwp_embd_sz
 
+                self.viewpoint_encoder = nn.Linear(vwp_size, vwp_embd_sz)
                 self.rep_model = RepresentationNetwork(
                     input_size=input_size,
                     hidden_dim=scnr_hidden_dim,
@@ -61,13 +59,14 @@ class SLIM(nn.Module):
             image_color = param["image_color"]
 
             # DRAW param
-            iter_num = param["iter_num"]
+            iter_num = param["draw_iter_num"]
             draw_h_size = param["draw_h_size"]
-            draw_z_size = param["z_size"]
+            draw_z_size = param["draw_z_size"]
             cond_size = vwp_embd_sz
             if not pretrain_draw:
                 cond_size += scnr_size
 
+            self.viewpoint_target_encoder = nn.Linear(vwp_size, vwp_embd_sz)
             self.gen_model = DRAW(
                 imw=image_width,
                 imh=image_height,
@@ -76,6 +75,7 @@ class SLIM(nn.Module):
                 h_size=draw_h_size,
                 z_size=draw_z_size,
                 cond_size=cond_size,
+                initc_tunning=param["draw_initc_tunning"]
             )
 
     def init_weights(self):
@@ -116,7 +116,7 @@ class SLIM(nn.Module):
 
             if not self.prtrn_c:
                 # Camera angels encoding
-                vw_embedd = self.viewpoint_embeddings(views)  # (B, N, VE)
+                vw_embedd = self.viewpoint_encoder(views)  # (B, N, VE)
 
                 # Scenes representation
                 sentence_embedd = tokens_embedd.mean(2)
@@ -126,7 +126,7 @@ class SLIM(nn.Module):
                 return tokens_embedd  # pretraining caption encoding
 
         if not self.prtrn_c:
-            cond = img_view
+            cond = self.viewpoint_target_encoder(img_view)  # (B, VE)
             if not self.prtrn_d:
                 cond = torch.cat((cond, r), dim=1)
 
@@ -137,18 +137,23 @@ class SLIM(nn.Module):
 
     def generate(self, batch: List[Tensor]) -> Tensor:
 
-        img = batch[0]  # (B, 3, 32, 32)
-        views = batch[1]  # (B, 10, 2)
-        tokens = batch[2]  # (B, 9, T)
+        img = batch[0]  # (B, imc, imh, imw)
+        views = batch[1]  # (B, N=9, 2)
+        img_view = batch[2]  # (B)
+        tokens = batch[3]  # (B, N=9, T)
 
-        vw_embedd = self.viewpoint_embeddings(views)  # (B, 10, VE)
-        tokens_embedd = self.embedding(tokens)
-        tokens_embedd = self.caption_encoder(tokens_embedd)  # (B, 9, T, CE)
-        r = self.rep_model(cpt_embs=tokens_embedd.mean(2),
-                           viewpoints=vw_embedd[:, 1:])  # (B, CE)
+        if not self.prtrn_d:
+            vw_embedd = self.viewpoint_encoder(views)  # (B, 10, VE)
+            tokens_embedd = self.embedding(tokens)
+            tokens_embedd = self.caption_encoder(
+                tokens_embedd)  # (B, 9, T, CE)
+            r = self.rep_model(cpt_embs=tokens_embedd.mean(2),
+                               viewpoints=vw_embedd[:, 1:])  # (B, CE)
 
-        image = self.gen_model.generate(x=img,
-                                        cond=torch.cat((r, vw_embedd[:, 0]),
-                                                       dim=1))
+        cond = self.viewpoint_target_encoder(img_view)  # (B, VE)
+        if not self.prtrn_d:
+            cond = torch.cat((cond, r), dim=1)
 
-        return image
+        output = self.gen_model.generate(x=img, cond=cond)
+
+        return output

@@ -11,41 +11,32 @@ from torch.utils.data import DataLoader
 from torch import optim
 import numpy as np
 
-from dataset.dataset_batcher import SlimDataset
-from models.SLIM import SLIM
-from dataset.preprocessing import get_mini_batch
-from helpers.train_helper import Trainer
-# from helpers.early_stopping import EarlyStopping
-from helpers.scheduler import LinearDecayLR, VarAnnealer
+from codes.dataset.dataset_batcher import SlimDataset
+from codes.models.SLIM import SLIM
+from codes.dataset.preprocessing import get_mini_batch
+from codes.helpers.train_helper import Trainer
+from codes.helpers.scheduler import LinearDecayLR, VarAnnealer
 
-from utils.gpu_cuda_helper import get_gpus_avail
-from utils.visualization import Visualizations
-
-# This is the branch
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-CUDA_LAUNCH_BLOCKING = 1
+from codes.utils.gpu_cuda_helper import select_device
+from codes.utils.utils import seed_everything
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Training SLIM Model")
-    parser.add_argument(
-        "--dataset_dir",
-        type=str,
-        default="/scratch/guszarzmo/aicsproject/data/slim/turk_data_torch/",
-        help="SLIM Dataset directory.")
+    parser.add_argument("--dataset_dir",
+                        type=str,
+                        default="/srv/data/zarzouram/lt2318/slim/turk_torch/",
+                        help="SLIM Dataset directory.")
 
-    parser.add_argument(
-        "--config_path",
-        type=str,
-        default="/home/guszarzmo@GU.GU.SE/LT2318/aics-project/code/config.json",
-        help="path to config file.")
+    parser.add_argument("--config_path",
+                        type=str,
+                        default="config.json",
+                        help="path to config file.")
+
+    parser.add_argument("--checkpoints_dir",
+                        type=str,
+                        default="/srv/data/zarzouram/lt2318/checkpoints",
+                        help="path to config file.")
 
     parser.add_argument(
         "--checkpoint_model",
@@ -54,52 +45,19 @@ def parse_arguments():
         help="If you want to resume trainng, pass model name to resume from.")
 
     parser.add_argument(
-        "--plot_env_name",
+        "--pretrain",
         type=str,
-        default="loss_plot",
-        help="Visdom env. name to plot the training and validation loss.")
-
-    parser.add_argument("--plot_loss_comp",
-                        type=str,
-                        default="y",
-                        help="Plot each component of loss separately")
+        default="draw",  #
+        help="pretraining a submodule, {draw, caption_encoder}")
 
     parser.add_argument("--gpu",
                         type=int,
                         default=-1,
                         help="GPU device to be used")
 
-    parser.add_argument("--check_grad",
-                        type=str,
-                        default="no",
-                        help="GPU device to be used")
-
     args = parser.parse_args()
 
     return parser, args
-
-
-def select_device(gpu_id: int) -> torch.device:
-    # get gpus that have >=75% free space
-    cuda_idx = get_gpus_avail()  # type: List[Tuple[int, float]]
-    cuda_id = None
-    if cuda_idx:
-        if gpu_id != -1:
-            selected_gpu_avail = next(
-                (i for i, v in enumerate(cuda_idx) if v[0] == gpu_id), None)
-            if selected_gpu_avail is not None:
-                cuda_id = gpu_id  # selected gpu has suitable free space
-        else:
-            cuda_id = cuda_idx[0][0]  # gpu with the most avail free space
-
-    if cuda_id is None:
-        device = torch.device("cpu")
-    else:
-        device = torch.device(f"cuda:{cuda_id}")
-
-    print(f"\ndevice selected: {device}")
-
-    return device
 
 
 def load_config_file(config_path: str) -> List[dict]:
@@ -110,13 +68,11 @@ def load_config_file(config_path: str) -> List[dict]:
 
 
 def load_model(model_parameters: dict,
-               device: torch.device,
                scheduler_param: dict,
                checkpoint_path: str = ""):
 
     lr_init = scheduler_param["lr_init"]
     model = SLIM(model_parameters)
-    model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr_init)
     scheduler = LinearDecayLR(optimizer, **scheduler_param)
     model_data = None
@@ -149,10 +105,6 @@ def run_train(train,
               vis,
               win_name,
               check_grad=False):
-
-    # early stop
-    # early_stop_patience = configs["early_stop_patience"]
-    # es = EarlyStopping(patience=early_stop_patience, min_delta=0.1)
 
     # other training param
     train_param = configs["train_param"]
@@ -298,27 +250,31 @@ if __name__ == "__main__":
     parser, args = parse_arguments()
 
     # select a device
-    device = select_device(args.gpu)
+    device = select_device(args.device)
 
     # Load configuration file
     configs = load_config_file(args.config_path)
 
-    # load training and validation dataloader
-    train_dataset = SlimDataset(root_dir=args.dataset_dir + "train")
-    train_iter = DataLoader(
-        train_dataset,
-        batch_size=configs["train_dataloader"]["file_batch"],
-        shuffle=True,
-        num_workers=configs["train_dataloader"]["num_workers"],
-        pin_memory=device.type == "cuda")
+    # seed
+    seed = configs["seed"]
+    seed_everything(seed)
 
-    val_dataset = SlimDataset(root_dir=args.dataset_dir + "valid")
-    val_iter = DataLoader(
-        val_dataset,
-        batch_size=configs["val_dataloader"]["file_batch"],
-        shuffle=True,
-        num_workers=configs["train_dataloader"]["num_workers"],
-        pin_memory=device.type == "cuda")
+    # training and validation dataloader
+    pretrain = args.pretrain  # type: str
+    ds_dir = args.dataset_dir + "train"
+    train_ds = SlimDataset(root_dir=ds_dir, pretrain=pretrain)
+    collate_fn = None if train_ds.tokens is None else train_ds.collate_fn
+    train_iter = DataLoader(train_ds,
+                            collate_fn=collate_fn,
+                            pin_memory=device.type == "cuda",
+                            **configs["dataloader"]["train"])
+
+    ds_dir = args.dataset_dir + "valid"
+    val_ds = SlimDataset(root_dir=ds_dir, pretrain=pretrain)
+    val_iter = DataLoader(val_ds,
+                          collate_fn=collate_fn,
+                          pin_memory=device.type == "cuda",
+                          **configs["dataloader"]["val"])
 
     # load model
     if args.checkpoint_model == "":
@@ -329,7 +285,7 @@ if __name__ == "__main__":
     hyperparameters = configs["model_hyperparameter"]
     scheduler_parm = configs["scheduler_parm"]
     model, optimizer, scheduler, var_scale, model_data = load_model(
-        hyperparameters, device, scheduler_parm, checkpoint_path)
+        hyperparameters, device, scheduler_parm, )
 
     # load trianer class
     train_param = configs["train_param"]

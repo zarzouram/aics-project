@@ -23,7 +23,7 @@ class DRAW(nn.Module):
                  h_dim: int,
                  z_dim: int,
                  cond_size: int,
-                 init_tunning: bool = False):
+                 initc_tunning: bool = False):
         """
         Parameters
         ----------
@@ -52,7 +52,7 @@ class DRAW(nn.Module):
         self.h_dim = h_dim
         self.T = iter_num
 
-        self.init_tunning = init_tunning
+        self.init_tunning = initc_tunning
 
         # Recurrent encoder/decoder models
         self.encoder = ConvLSTMCell(img_c + h_dim,
@@ -92,7 +92,7 @@ class DRAW(nn.Module):
         self.h_dec = torch.zeros(1, self.c, self.h, self.w)
         self.c_dec = torch.zeros(1, self.c, self.h, self.w)
 
-        if self.init_tunning:
+        if self.initc_tunning:
             self.h_enc = nn.Parameter(self.h_enc, requires_grad=True)
             self.c_enc = nn.Parameter(self.c_enc, requires_grad=True)
             self.h_dec = nn.Parameter(self.h_dec, requires_grad=True)
@@ -102,11 +102,11 @@ class DRAW(nn.Module):
         batch_size = x.size(0)
 
         # img_c = 3
-        # z_dim = 64
+        # z_dim = 32
         # h_dim = 128
         # Hidden states initialization
-        # h_enc: encoder hidden state size = (B, 128, 64, 64)
-        # h_dec: decoder hidden state size = (B, 128, 64, 64)
+        # h_enc: encoder hidden state size = (B, 128, 32, 32)
+        # h_dec: decoder hidden state size = (B, 128, 32, 32)
         h_enc = self.h_enc.repeat(batch_size, 1, 1, 1)
         c_enc = self.c_enc.repeat(batch_size, 1, 1, 1)
         h_dec = self.h_enc.repeat(batch_size, 1, 1, 1)
@@ -117,10 +117,10 @@ class DRAW(nn.Module):
         for _ in range(self.T):
 
             # Reconstruction error
-            epsilon = x - r  # (B, 3, 64, 64)
+            epsilon = x - r  # (B, 3, 32, 32)
 
             # Infer posterior density from hidden state (W//8)
-            # (B, 3+3+128, 64, 64) ==> (B, 128, 64, 64)
+            # (B, 3+3+128, 32, 32) ==> (B, 128, 32, 32)
             h_enc, c_enc = self.encoder(torch.cat([x, epsilon, h_dec], dim=1),
                                         h_enc, c_enc)
 
@@ -130,13 +130,13 @@ class DRAW(nn.Module):
             p_prior = Normal(p_mu, p_std)
 
             # Posterior distribution
-            # (B, 128, 64, 64) ==> 2*(B, 64, 64, 64)
+            # (B, 128, 32, 32) ==> 2*(B, 128, 32, 32)
             q_mu, q_log_var = torch.chunk(self.posterior(h_enc), 2, dim=1)
             q_std = torch.exp(q_log_var * 0.5)
             q_posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
-            # (B, 64, 64, 64)
+            # (B, 128, 32, 32)
             z = q_posterior.rsample()
 
             # Send representation through decoder
@@ -149,7 +149,7 @@ class DRAW(nn.Module):
                                         c_dec)
 
             # write output
-            # (B, 128, 64, 64) ==> 2*(B, 3, 64, 64)
+            # (B, 128, 32, 32) ==> 2*(B, 3, 32, 32)
             r_mu, r_log_var = torch.chunk(self.write(h_dec), 2, dim=1)
             r += r_mu
 
@@ -188,7 +188,7 @@ class DRAW(nn.Module):
             z = Normal(p_mu, p_std).sample()
 
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
-            cond_ = cond_.contiguous().repeat(1, 1, self.h, self.w)
+            cond_ = cond_.contiguous().repeat(1, 1, *z.size()[:-2])
             h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
                                         c_dec)
 
