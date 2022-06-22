@@ -285,7 +285,10 @@ if __name__ == "__main__":
     hyperparameters = configs["model_hyperparameter"]
     scheduler_parm = configs["scheduler_parm"]
     model, optimizer, scheduler, var_scale, model_data = load_model(
-        hyperparameters, device, scheduler_parm, )
+        hyperparameters,
+        device,
+        scheduler_parm,
+    )
 
     # load trianer class
     train_param = configs["train_param"]

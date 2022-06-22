@@ -70,36 +70,3 @@ class SlimDataset(torch.utils.data.Dataset):
 
     def collate_fn(self):
         pass
-
-
-# class collate_fn(object):
-
-#     def __init__(self, max_len, pad_id=0):
-#         self.max_len = max_len
-#         self.pad = pad_id
-
-#     def __call__(self, batch) -> Tuple[Tensor, Tensor, Tensor]:
-#         """
-#         Padds batch of variable lengthes to a fixed length (max_len)
-#         """
-#         X, y, ls = zip(*batch)
-#         X: Tuple[Tensor]
-#         y: Tuple[Tensor]
-#         ls: Tuple[Tensor]
-
-#         # pad tuple
-#         # [B, max_seq_len, captns_num=5]
-#         ls = torch.stack(ls)  # (B, num_captions)
-#         y = pad_sequence(y, batch_first=True, padding_value=self.pad)
-
-#         # pad to the max len
-#         pad_right = self.max_len - y.size(1)
-#         if pad_right > 0:
-#             # [B, captns_num, max_seq_len]
-#             y = y.permute(0, 2, 1)  # type: Tensor
-#             y = ConstantPad1d((0, pad_right), value=self.pad)(y)
-#             y = y.permute(0, 2, 1)  # [B, max_len, captns_num]
-
-#         X = torch.stack(X)  # (B, 3, 256, 256)
-
-#         return X, y, ls
