@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import torch
 from torch import nn
@@ -11,10 +11,11 @@ from models.generation import DRAW
 
 class SLIM(nn.Module):
 
-    def __init__(self,
-                 param: dict,
-                 pretrain_draw: bool = False,
-                 pretrain_caption_encoder: bool = False):
+    def __init__(
+            self,
+            params: dict,
+            pretrain: Optional[str] = None,  # draw or caption_encoder
+    ):
         """
         Parameters
         ----------
@@ -22,26 +23,24 @@ class SLIM(nn.Module):
         """
         super(SLIM, self).__init__()
 
-        self.prtrn_d = pretrain_draw
-        self.prtrn_c = pretrain_caption_encoder
+        self.pretrain = pretrain
 
-        x1 = not pretrain_draw
-        x2 = not pretrain_caption_encoder
-        assert x1 or x2, "You can pretain only one module at a time"  # noqa" E5011
-
-        vwp_size = param["vwp_size"]  # camera angle
-        vwp_embd_sz = param["vwp_embd_sz"]  # angel encoder output size
-        if not pretrain_draw:
-            vocab_size = param["vocab_size"]
-            cptn_embs_sz = param["cptn_embs_sz"]  # caption text embedding size
-
+        vwp_size = params["vwp_size"]  # camera angle
+        vwp_embd_sz = params["vwp_embd_sz"]  # angel encoder output size
+        if pretrain is None or pretrain == "caption_encoder":
+            # Captions word encoder
+            vocab_size = params["vocab_size"]
+            cptn_embs_sz = params[
+                "cptn_embs_sz"]  # caption text embedding size
             self.embedding = nn.Embedding(vocab_size, cptn_embs_sz)
             self.caption_encoder = CaptionEncoder(vocab_size=vocab_size,
                                                   embd_size=cptn_embs_sz)
 
-            if not pretrain_caption_encoder:
-                scnr_size = param["scnr_size"]  # scene repvector dim
-                scnr_hidden_dim = param["scnr_hidden_dim"]  # scene rep. hidden
+            if pretrain is None:
+                # Scene representation netwerk
+                scnr_size = params["scnr_size"]  # scene repvector dim
+                scnr_hidden_dim = params[
+                    "scnr_hidden_dim"]  # scene rep. hidden
                 input_size = cptn_embs_sz + vwp_embd_sz
 
                 self.viewpoint_encoder = nn.Linear(vwp_size, vwp_embd_sz)
@@ -52,31 +51,29 @@ class SLIM(nn.Module):
 
             self.dropout = nn.Dropout(0.5)
 
-        if not pretrain_caption_encoder:
-            # Image
-            image_width = param["image_width"]
-            image_height = param["image_height"]
-            image_color = param["image_color"]
+        if pretrain is None or pretrain.find("draw") == -1:
+            # Image generation network
+            image_width = params["image_width"]
+            image_height = params["image_height"]
+            image_color = params["image_color"]
 
             # DRAW param
-            iter_num = param["draw_iter_num"]
-            draw_h_size = param["draw_h_size"]
-            draw_z_size = param["draw_z_size"]
+            iter_num = params["draw_iter_num"]
+            draw_h_size = params["draw_h_size"]
+            draw_z_size = params["draw_z_size"]
             cond_size = vwp_embd_sz
-            if not pretrain_draw:
+            if pretrain is None:
                 cond_size += scnr_size
 
             self.viewpoint_target_encoder = nn.Linear(vwp_size, vwp_embd_sz)
-            self.gen_model = DRAW(
-                imw=image_width,
-                imh=image_height,
-                imc=image_color,
-                iter_num=iter_num,
-                h_size=draw_h_size,
-                z_size=draw_z_size,
-                cond_size=cond_size,
-                initc_tunning=param["draw_initc_tunning"]
-            )
+            self.gen_model = DRAW(imw=image_width,
+                                  imh=image_height,
+                                  imc=image_color,
+                                  iter_num=iter_num,
+                                  h_size=draw_h_size,
+                                  z_size=draw_z_size,
+                                  cond_size=cond_size,
+                                  initc_tunning=params["draw_initc_tunning"])
 
     def init_weights(self):
         for m in self.modules():
@@ -91,7 +88,7 @@ class SLIM(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, batch: List[Tensor]) -> Tensor:
+    def forward(self, batch: List[str, Tensor]) -> Tensor:
 
         # Sizes:
         # ------
@@ -103,18 +100,24 @@ class SLIM(nn.Module):
         # Viewpoints encoder output size: VE
         # Scene encoder output size: SE
 
-        img = batch[0]  # (B, imc, imh, imw)
-        views = batch[1]  # (B, N=9, 2)
-        img_view = batch[2]  # (B)
-        tokens = batch[3]  # (B, N=9, T)
+        if self.pretrain is None:
+            img = batch[0]  # (B, imc, imh, imw)
+            views = batch[1]  # (B, N=9, 2)
+            img_view = batch[2]  # (B)
+            tokens = batch[3]  # (B, N=9, T)
+        elif self.pretrain.find("draw") != 1:
+            img = batch[0]  # (B*10, imc, imh, imw)
+            views = batch[1]  # (B*10, 2)
+        else:
+            tokens = batch[3]  # (B*10, T)
 
-        if not self.prtrn_d:
+        if self.pretrain is None or self.pretrain == "caption_encoder":
             # Caption tokens embedding
             tokens_embedd = self.dropout(self.embedding(tokens))
             tokens_embedd = self.caption_encoder(tokens_embedd)
             # (B, N=9, T, CE)
 
-            if not self.prtrn_c:
+            if self.pretrain is None:
                 # Camera angels encoding
                 vw_embedd = self.viewpoint_encoder(views)  # (B, N, VE)
 

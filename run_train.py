@@ -67,31 +67,31 @@ def load_config_file(config_path: str) -> List[dict]:
     return configs
 
 
-def load_model(model_parameters: dict,
-               scheduler_param: dict,
-               checkpoint_path: str = ""):
+# def load_model(model_parameters: dict,
+#                scheduler_param: dict,
+#                checkpoint_path: str = ""):
 
-    lr_init = scheduler_param["lr_init"]
-    model = SLIM(model_parameters)
-    optimizer = optim.Adam(model.parameters(), lr=lr_init)
-    scheduler = LinearDecayLR(optimizer, **scheduler_param)
-    model_data = None
-    # Variance scales
-    var_scale = VarAnnealer(**configs["var_scale_parm"])
+#     lr_init = scheduler_param["lr_init"]
+#     model = SLIM(model_parameters)
+#     optimizer = optim.Adam(model.parameters(), lr=lr_init)
+#     scheduler = LinearDecayLR(optimizer, **scheduler_param)
+#     model_data = None
+#     # Variance scales
+#     var_scale = VarAnnealer(**configs["var_scale_parm"])
 
-    if checkpoint_path != "":
-        model_data = torch.load(checkpoint_path,
-                                map_location=torch.device("cpu"))
-        model_state_dict = model_data["model_state_dict"]
-        optimizer_state_dict = model_data["optimizer_state_dict"]
-        scheduler_state_dict = model_data["scheduler_state_dict"]
-        model.load_state_dict(model_state_dict)
-        optimizer.load_state_dict(optimizer_state_dict)
-        scheduler.load_state_dict(scheduler_state_dict)
-        var_scale.scale = model_data["var_scale"]
-        var_scale.t = model_data["steps"] + 1
+#     if checkpoint_path != "":
+#         model_data = torch.load(checkpoint_path,
+#                                 map_location=torch.device("cpu"))
+#         model_state_dict = model_data["model_state_dict"]
+#         optimizer_state_dict = model_data["optimizer_state_dict"]
+#         scheduler_state_dict = model_data["scheduler_state_dict"]
+#         model.load_state_dict(model_state_dict)
+#         optimizer.load_state_dict(optimizer_state_dict)
+#         scheduler.load_state_dict(scheduler_state_dict)
+#         var_scale.scale = model_data["var_scale"]
+#         var_scale.t = model_data["steps"] + 1
 
-    return model, optimizer, scheduler, var_scale, model_data
+#     return model, optimizer, scheduler, var_scale, model_data
 
 
 def run_train(train,
@@ -283,6 +283,8 @@ if __name__ == "__main__":
         checkpoint_path = configs["checkpoints_dir"] + args.checkpoint_model
 
     hyperparameters = configs["model_hyperparameter"]
+    model = SLIM(params=hyperparameters, pretrain=pretrain)
+
     scheduler_parm = configs["scheduler_parm"]
     model, optimizer, scheduler, var_scale, model_data = load_model(
         hyperparameters,
