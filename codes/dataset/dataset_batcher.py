@@ -29,18 +29,18 @@ class SlimDataset(torch.utils.data.Dataset):
         images_path = pathlib.Path(root_dir) / "images.hdf5"
 
         with h5py.File(images_path) as h5_file:
-            if pretrain is None or pretrain != "caption_encoder":
+            if pretrain is None or pretrain.find("draw") == -1:
                 images_ds = h5_file["images"]
                 views_ds = h5_file["cameras"]
                 group_name, = list(images_ds.keys())
                 self.images = np.array(images_ds[group_name])
                 self.views = np.array(views_ds[group_name])
                 self.transform = transform
-                if pretrain.find("draw") != -1:
+                if pretrain.find("draw") == -1:
                     self.texts = None
                     self.tokens = None
 
-            if pretrain is None or pretrain.find("draw") == -1:
+            if pretrain is None or pretrain == "caption_encoder":
                 pass
                 if pretrain == "caption_encoder":
                     self.images = None
