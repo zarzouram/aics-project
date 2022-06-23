@@ -4,9 +4,9 @@ import torch
 from torch import nn
 from torch import Tensor
 
-from models.transformer_encoder import CaptionEncoder
-from models.representation import RepresentationNetwork
-from models.generation import DRAW
+from codes.models.transformer_encoder import CaptionEncoder
+from codes.models.representation import RepresentationNetwork
+from codes.models.generation import DRAW
 
 
 class SLIM(nn.Module):
@@ -88,7 +88,7 @@ class SLIM(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, batch: List[str, Tensor]) -> Tensor:
+    def forward(self, batch: List[Tensor]) -> Tensor:
 
         # Sizes:
         # ------

@@ -10,7 +10,7 @@ from torch import Tensor
 from torch import nn
 from torch.distributions import Normal, kl_divergence
 
-from layers.conv_lstm_simple import ConvLSTMCell
+from codes.layers.conv_lstm_simple import ConvLSTMCell
 
 
 class DRAW(nn.Module):
