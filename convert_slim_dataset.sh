@@ -27,24 +27,24 @@ if [ $ds != "turk" ] && [ $ds != "synth" ]; then
 fi
 
 # Convert tfrecords
-echo "Strat processing $ds train dataset"
+echo "Start processing $ds train dataset"
 python3 ./codes/dataset/convert_slim_dataset.py \
                                 --dataset_path ${ds_dir} \
                                 --dataset ${ds} \
                                 --mode "train"
 
+echo -e "\nStart processing $ds test dataset"
+python3 ./codes/dataset/convert_slim_dataset.py \
+                                --dataset_path ${ds_dir} \
+                                --dataset ${ds} \
+                                --mode "test"
+
 if [[ "$ds" == "turk" ]]; then
-    echo -e "\nStrat processing $ds val dataset"
+    echo -e "\nStart processing $ds val dataset"
     python3 ./codes/dataset/convert_slim_dataset.py \
                                     --dataset_path ${ds_dir} \
                                     --dataset ${ds} \
                                     --mode "valid"
-
-    echo -e "\nStrat processing $ds test dataset"
-    python3 ./codes/dataset/convert_slim_dataset.py \
-                                    --dataset_path ${ds_dir} \
-                                    --dataset ${ds} \
-                                    --mode "test"
 
 fi
 

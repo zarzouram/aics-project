@@ -53,7 +53,7 @@ class PositionalEncoding(nn.Module):
             >>> output = pos_encoder(x)
         """
 
-        x = x + self.pe[:x.size(0), :]
+        x = x + self.pe[:x.size(0), :].requires_grad_(False)
         return self.dropout(x)
 
 
@@ -107,7 +107,7 @@ class CaptionEncoder(nn.Module):
                  ff_dim: int = 200,
                  num_layers: int = 4,
                  num_heads: int = 4,
-                 dropouts: List[float] = [0.1, 0.1]):
+                 dropouts: List[float] = [0.5, 0.1]):
         super(CaptionEncoder, self).__init__()
 
         # Embedding layer
@@ -120,6 +120,13 @@ class CaptionEncoder(nn.Module):
                                      dropout=dropouts[1])
         self.transfomer_encoders = nn.ModuleList(
             [copy.deepcopy(encoder_layer) for _ in range(num_layers)])
+
+        self.init_weights()
+
+    def init_weights(self):
+        for p in self.transfomer_encoders.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
     def forward(self, x):
 

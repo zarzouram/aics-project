@@ -1,18 +1,22 @@
 {
     "experiment": {
-        "tag": "pretrain conditional draw",
-        "comment": "using the MLP(cos theta, sin theta) as the conditional vector"
+        "tag": "pretrain conditional-draw",
+        "comment": "pretrain conditional draw on natural dataset. lr based on the paper. DRAW has a learnable initial conditions"
     },
     "seed": 9001,
+    "glove": {
+        "name": "42B",
+        "dir": "/srv/data/zarzouram/resources/embeddings/Glove/",
+        "dim": 300
+    },
     "dataloader": {
         "train": {
             "batch_size": 32,
-            "shuffle": true,
             "num_workers": 4
         },
         "val": {
             "batch_size": 1,
-            "shuffle": true,
+            "shuffle": false,
             "num_workers": 4
         },
         "test": {
@@ -25,39 +29,28 @@
         "vwp_size": 2,
         "vwp_embd_sz": 32,
         "cptn_embs_sz": 64,
-        "scnr_size": 256,
+        "scnr_dim": 256,
         "scnr_hidden_dim": 256,
         "image_width": 32,
         "image_height": 32,
         "image_color": 3,
         "draw_iter_num": 12,
-        "draw_h_size": 128,
-        "draw_z_size": 128,
+        "draw_h_dim": 128,
+        "draw_z_dim": 128,
         "draw_initc_tunning": true
     },
     "optim_params": {
-        "caption_encoder_lr": 1e-3,
-        "scene_rep_lr": 1e-3,
-        "draw_lr": 1e-4,
-        "lr_factors": [
-            0.75,
-            0.75
-        ]
+        "caption_encoder_lr": 5e-4,
+        "caption_encoder_beta": [0.9, 0.98],
+        "warmup": 4000,
+        "cos_step": 20000,
+        "lr_init": 5e-4,
+        "lr_final": 5e-5
     },
-    "scheduler_parm": {
-        "caption_encoder": {},
-        "draw": {
-            "lr_init": 1e-3,
-            "lr_final": 1e-5,
-            "step_num": 2e6
-        }
-    },
-
     "train_param": {
-        "mini_batch_size": 32,
-        "samples_num": 3200,
-        "checkpoint_interv": 5
-    },
-    "early_stop_patience": 3000,
-    "total_steps_num": 2000000
+        "num_minibatch": 100,
+        "checkpoint_interv": 5,
+        "num_steps": 1e6
+    }
+
 }

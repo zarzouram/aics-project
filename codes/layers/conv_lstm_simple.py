@@ -30,35 +30,27 @@ class ConvLSTMCell(nn.Module):
         self.hidden_dim = hidden_channels
         kwargs = dict(kernel_size=kernel_size, stride=stride, padding=padding)
 
-        self.Wxf = nn.Conv2d(self.input_dim, self.hidden_dim, **kwargs)
-        self.Wxi = nn.Conv2d(self.input_dim, self.hidden_dim, **kwargs)
-        self.Wxc = nn.Conv2d(self.input_dim, self.hidden_dim, **kwargs)
-        self.Wxo = nn.Conv2d(self.input_dim, self.hidden_dim, **kwargs)
-
-        # hidden state
-        self.Whf = nn.Conv2d(self.hidden_dim,
+        self.Wxf = nn.Conv2d(self.input_dim,
                              self.hidden_dim,
-                             kernel_size=5,
-                             padding=2,
-                             stride=1)
-
-        self.Whi = nn.Conv2d(self.hidden_dim,
+                             **kwargs,
+                             bias=False)
+        self.Wxi = nn.Conv2d(self.input_dim,
                              self.hidden_dim,
-                             kernel_size=5,
-                             padding=2,
-                             stride=1)
-
-        self.Whc = nn.Conv2d(self.hidden_dim,
+                             **kwargs,
+                             bias=False)
+        self.Wxc = nn.Conv2d(self.input_dim,
                              self.hidden_dim,
-                             kernel_size=5,
-                             padding=2,
-                             stride=1)
-
-        self.Who = nn.Conv2d(self.hidden_dim,
+                             **kwargs,
+                             bias=False)
+        self.Wxo = nn.Conv2d(self.input_dim,
                              self.hidden_dim,
-                             kernel_size=5,
-                             padding=2,
-                             stride=1)
+                             **kwargs,
+                             bias=False)
+
+        self.Whf = nn.Conv2d(self.hidden_dim, self.hidden_dim, **kwargs)
+        self.Whi = nn.Conv2d(self.hidden_dim, self.hidden_dim, **kwargs)
+        self.Whc = nn.Conv2d(self.hidden_dim, self.hidden_dim, **kwargs)
+        self.Who = nn.Conv2d(self.hidden_dim, self.hidden_dim, **kwargs)
 
         self.nrm_i = nn.BatchNorm2d(hidden_channels)
         self.nrm_f = nn.BatchNorm2d(hidden_channels)

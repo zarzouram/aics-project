@@ -25,6 +25,13 @@ class RepresentationNetwork(nn.Module):
             nn.Linear(hidden_dim, output_size),
         )
 
+        self.init_weights()
+
+    def init_weights(self):
+        for p in self.scene_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
     def forward(self, cpt_embs: Tensor, viewpoints_embd: Tensor) -> Tensor:
 
         # Scene representation

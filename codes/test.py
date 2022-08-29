@@ -1,35 +1,48 @@
 # %%
 import torch
-from dataset.dataset_batcher import SlimDataset
-from torch.utils.data import DataLoader
-from dataset.preprocessing import get_mini_batch
+import torch.nn as nn
+from torch.optim import Adam
+import matplotlib.pyplot as plt
+
+from helpers.scheduler import LinearDecayLR, XfmrWarmupScheduler
 
 # %%
-dataset_dir = "/scratch/guszarzmo/aicsproject/data/slim/turk_data_torch/"
+model = [torch.nn.Parameter(torch.randn(2, 2, requires_grad=True))]
+optimizer = Adam(model, lr=5e-4)
+lr_scheduler1 = XfmrWarmupScheduler(optimizer=optimizer,
+                                    warmup=8000,
+                                    step_num=1e6)
+
+lr_scheduler2 = LinearDecayLR(optimizer=optimizer)
+
 
 # %%
-train_dataset = SlimDataset(root_dir=dataset_dir + "train")
-train_iter = DataLoader(train_dataset, batch_size=1, shuffle=False)
+for epoch in range(20):
+    for s in range(10):
+        optimizer.step()
+    lr_scheduler1.step(epoch=s)
 
 # %%
-vs = []
-for train_batch in train_iter:
-    trn_mini_b = get_mini_batch(data=train_batch, size_=0)
-    views = torch.cat((trn_mini_b[2], trn_mini_b[1].unsqueeze(1)), dim=1)
-    b = views.size(-1)
-    vs.append(views.view(-1 , b))
+epochs = list(range(int(1e6)))
+plt.figure(figsize=(8, 3))
+plt.plot(epochs, [lr_scheduler1.get_lr_factor(e) for e in epochs])
+plt.ylabel("Learning rate factor")
+plt.xlabel("Iterations (in batches)")
+plt.title("Cosine Warm-up Learning Rate Scheduler")
+plt.show()
 
 # %%
-torch.cat(vs, dim=0).size()
-# %%
-torch.unique(torch.cat(vs, dim=0)[:, :2], dim=0)
-# %%
-torch.max(torch.cat(vs, dim=0), dim=0)
+print([lr_scheduler1.get_lr_factor(e) for e in epochs][-1])
+print([lr_scheduler1.get_lr_factor(e) for e in epochs][20000])
 
 # %%
-torch.min(torch.cat(vs, dim=0), dim=0)
+epochs = list(range(int(1e6)))
+plt.figure(figsize=(8, 3))
+plt.plot(epochs, [lr_scheduler2.get_lr_factor(e) for e in epochs])
+plt.ylabel("Learning rate factor")
+plt.xlabel("Iterations (in batches)")
+plt.title("Cosine Warm-up Learning Rate Scheduler")
+plt.show()
 # %%
-torch.unique(torch.round(torch.cat(vs, dim=0), decimals=4), dim=0).size()
-# %%
-torch.cat(vs, dim=0).size(0)
+print([lr_scheduler2.get_lr_factor(e) for e in epochs][-1])
 # %%

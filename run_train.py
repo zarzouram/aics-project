@@ -1,20 +1,21 @@
 import argparse
-import json
+from datetime import datetime
+from pathlib import Path
 from tqdm import tqdm
 
-from typing import List
-
-from torch.utils.data import DataLoader
-# from torch import optim
-# import numpy as np
+import torch
+from torch.utils.data import DataLoader, RandomSampler
+from torch.optim import Adam
 
 from codes.dataset.dataset_batcher import SlimDataset
 from codes.models.SLIM import SLIM
 from codes.dataset.preprocessing import get_mini_batch
+from codes.helpers.scheduler import XfmrWarmupScheduler, LinearDecayLR
 # from codes.helpers.train_helper import Trainer
 
 from codes.utils.gpu_cuda_helper import select_device
-from codes.utils.utils import seed_everything
+from codes.utils.utils import seed_everything, save_config_file
+from codes.utils.utils import load_config_file
 
 
 def parse_arguments():
@@ -26,7 +27,7 @@ def parse_arguments():
 
     parser.add_argument("--config_path",
                         type=str,
-                        default="config.json",
+                        default="codes/config.json",
                         help="path to config file.")
 
     parser.add_argument("--checkpoints_dir",
@@ -40,28 +41,32 @@ def parse_arguments():
         default="",
         help="If you want to resume trainng, pass model name to resume from.")
 
+    parser.add_argument("--load_pretrain",
+                        type=str,
+                        default="",
+                        help="path to pretrained module to be load")
+
     parser.add_argument(
         "--pretrain",
         type=str,
-        default="draw",  #
+        default="",  #
         help="pretraining a submodule, {draw, caption_encoder}")
+
+    parser.add_argument(
+        "--freeze_gen",
+        type=int,
+        default=-1,  #
+        help="number of epochs to freeze the DRAW module")
 
     parser.add_argument(
         '--device',
         type=str,
-        default="gpu",  # gpu, cpu
-        help='Device to be used either gpu or cpu.')
+        default="mgpu",  # gpu, cpu
+        help='Device to be used {gpu, mgpu, cpu}')
 
     args = parser.parse_args()
 
     return parser, args
-
-
-def load_config_file(config_path: str) -> List[dict]:
-    with open(config_path, "r") as f:
-        configs = json.load(f)
-
-    return configs
 
 
 def run_train(train,
@@ -216,83 +221,129 @@ def run_train(train,
 
 if __name__ == "__main__":
 
+    vocab_specials = {"pad": "<pad>", "eos": "<eos>", "unk": "<unk>"}
+
     # parse argument command
     parser, args = parse_arguments()
-
-    # select a device
-    device = select_device(args.device)
+    freeze_gen = args.freeze_gen
 
     # Load configuration file
     configs = load_config_file(args.config_path)
+    config_loader = configs["dataloader"]
+    configs_train = configs["train_param"]
+    configs_glove = configs["glove"]
+    config_optm = configs["optim_params"]
+    hyperparameters = configs["model_hyperparameter"]
+
+    # training status
+    resume = args.checkpoint_model if args.checkpoint_model else None
+    load_pretrain = args.load_pretrain if args.load_pretrain else None
+    train_status_logic = not (resume is not None and load_pretrain is not None)
+    train_status_messege = "Either loading a checkpoint or a pretrained model"
+    assert train_status_logic, train_status_messege
+
+    pretrain = args.pretrain if args.pretrain else None
+    freeze_logic = not (freeze_gen != -1 and pretrain is not None)
+    freeze_mssg = "Can't freeze DRAW submodule and pretrain at the same time."
+    assert freeze_logic, freeze_mssg
+
+    # experiment status
+    checkpoint_dir = Path(args.checkpoints_dir)
+    if resume is None:
+        time_tag = str(datetime.now().strftime("%d%m.%H%M"))  # exp. name
+        checkpoint_dir = checkpoint_dir / time_tag
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        save_config_file(str(checkpoint_dir / "CONFIG_copy.json"), configs)
+
+    else:  # resume from checkpoint
+        time_tag = checkpoint_dir.parent
+        checkpoint_path = checkpoint_dir / args.checkpoint_model
+        vocab_path = checkpoint_dir + "vocab.pt"
+
+    # select a device
+    device = select_device(args.device)
+    if isinstance(device, list):
+        device_ids = device
+        device = torch.device(f"cuda:{device[0]}")
+        cudas = f"cuda:{device_ids[0]} & cuda:{device_ids[1]}"
+        print(f"selected devices are {cudas}.\n")
+    else:
+        print(f"selected device is {device}.\n")
+        device_ids = None
+
+    # some parameters
+    minibatch_size = config_loader["train"]["batch_size"]
+    num_samples = minibatch_size * configs_train["num_minibatch"]
+    num_steps = configs_train["num_steps"]
 
     # seed
     seed = configs["seed"]
     seed_everything(seed)
 
     # training and validation dataloader
-    pretrain = args.pretrain  # type: str
     ds_dir = args.dataset_dir + "train"
-    train_ds = SlimDataset(root_dir=ds_dir, pretrain=pretrain)
+    train_ds = SlimDataset(root_dir=ds_dir,
+                           pretrain=pretrain,
+                           glove_name=configs_glove["name"],
+                           glove_dir=configs_glove["dir"],
+                           glove_dim=configs_glove["dim"],
+                           vocab_specials=vocab_specials)
     collate_fn = None if train_ds.tokens is None else train_ds.collate_fn
+    sampler = RandomSampler(train_ds, num_samples=num_samples)
     train_iter = DataLoader(train_ds,
                             collate_fn=collate_fn,
                             pin_memory=device.type == "cuda",
-                            **configs["dataloader"]["train"])
+                            sampler=sampler,
+                            **config_loader["train"])
 
-    ds_dir = args.dataset_dir + "valid"
-    val_ds = SlimDataset(root_dir=ds_dir, pretrain=pretrain)
+    ds_dir = args.dataset_dir + "val"
+    val_ds = SlimDataset(root_dir=ds_dir,
+                         pretrain=pretrain,
+                         glove_name=configs_glove["name"],
+                         glove_dir=configs_glove["dir"],
+                         glove_dim=configs_glove["dim"],
+                         vocab_specials=vocab_specials)
+    collate_fn = None if val_ds.tokens is None else val_ds.collate_fn
     val_iter = DataLoader(val_ds,
                           collate_fn=collate_fn,
                           pin_memory=device.type == "cuda",
-                          **configs["dataloader"]["val"])
+                          **config_loader["val"])
 
-    # load model
-    if args.checkpoint_model == "":
-        checkpoint_path = ""
-    else:  # resume from checkpoint
-        checkpoint_path = configs["checkpoints_dir"] + args.checkpoint_model
-
-    hyperparameters = configs["model_hyperparameter"]
+    # Construt model
+    if pretrain is None or pretrain == "caption_encoder":
+        hyperparameters["vocab_size"] = len(train_ds.vocab)
     model = SLIM(params=hyperparameters, pretrain=pretrain)
+    if load_pretrain is not None:
+        model.load_pretrained(load_pretrain)
+        if freeze_gen != -1:  # freeze DRAW sub-module
+            model.freeze_draw()
 
-    # # load trianer class
-    # train_param = configs["train_param"]
-    # # number of steps per epoch
-    # epoch_intrv = int(train_param["samples_num"] /
-    #                   train_param["mini_batch_size"])
-    # trainer = Trainer(model,
-    #                   device,
-    #                   epoch_interval=epoch_intrv,
-    #                   save_path=configs["checkpoints_dir"])
-    # if args.checkpoint_model != "":  # resume from checkpoint
-    #     trainer.global_steps = model_data["steps"] + 1
-    #     trainer.best_loss = model_data["loss"]
-    #     trainer.epoch = model_data["epoch"]
+    elif pretrain is None or pretrain == "caption_encoder":
+        vectors = train_ds.get_glove(train_ds.pad_value)
+        model.caption_encoder.embedding.from_pretrained(vectors, freeze=False)
 
-    # # Init Visualization
-    # env_name = args.plot_env_name
-    # # vis = Visualizations(env_name=env_name)
-    # legend = [["Train", "Validation"]]
-    # title = [f"Loss Plot (mean every 1 epoch/{epoch_intrv} steps)"]
-    # xlabel = [f"Epoch ({epoch_intrv} steps)"]
-    # ylabel = ["ELBO Loss"]
-    # win_name = [f"{env_name}_total_Loss"]
-    # if args.plot_loss_comp.lower() == "y":
-    #     for loss_type in ["Const_Loss", "KlD_Loss"]:
-    #         legend.append(["Train", "Validation"])
-    #         title.append(
-    #             f"{loss_type} Plot (mean every 1 epoch/{epoch_intrv} steps)")
-    #         xlabel.append(f"Epoch ({epoch_intrv} steps)")
-    #         ylabel.append(f"{loss_type}")
-    #         win_name.append(f"{env_name}_{loss_type}")
-    # opt_win = {
-    #     "win_name": win_name,
-    #     "xlabel": xlabel,
-    #     "ylabel": ylabel,
-    #     "title": title,
-    #     "legend": legend
-    # }
-    # vis.add_wins(**opt_win)
+    # Optimizer
+    optm_group = []
+    if pretrain is None or pretrain == "caption_encoder":
+        # transformet optimizer
+        xfmr_optm = Adam(model.caption_encoder.parameters(),
+                         lr=config_optm["caption_encoder_lr"],
+                         betas=config_optm["caption_encoder_beta"],
+                         eps=1e-9)
+        xmfr_scheduler = XfmrWarmupScheduler(optimizer=xfmr_optm)
 
-    # run_train(trainer, train_iter, val_iter, model, optimizer, scheduler,
-    #           configs, var_scale, vis, win_name)
+        # representation scene submodule optimizer
+        if pretrain is None:
+            optm_group.append({"params": model.viewpoint_encoder.parameters()})
+            optm_group.append({"params": model.rep_model.parameters()})
+
+    if pretrain is None or pretrain == "draw":
+        draw_parms = [{
+            "params": model.target_viewpoint_encoder.parameters()
+        }, {
+            "params": model.gen_model.parameters()
+        }]
+        if freeze_gen != -1:
+            optm_group.append(draw_parms)
+        optm = Adam(optm_group, lr=config_optm["lr_init"])
+        scheduler = LinearDecayLR(optimizer=optm)

@@ -16,13 +16,13 @@ from codes.layers.conv_lstm_simple import ConvLSTMCell
 class DRAW(nn.Module):
 
     def __init__(self,
-                 img_w: int,
-                 img_h: int,
-                 img_c: int,
+                 imw: int,
+                 imh: int,
+                 imc: int,
                  iter_num: int,
                  h_dim: int,
                  z_dim: int,
-                 cond_size: int,
+                 cond_dim: int,
                  initc_tunning: bool = False):
         """
         Parameters
@@ -43,52 +43,39 @@ class DRAW(nn.Module):
         """
         super(DRAW, self).__init__()
 
-        self.h = img_h
-        self.w = img_w
-        self.x_dims = (img_w, img_h)
-        self.c = img_c
+        self.h = imh
+        self.w = imw
+        self.x_dims = (imw, imh)
+        self.c = imc
 
         self.z_dim = z_dim
         self.h_dim = h_dim
         self.T = iter_num
 
-        self.init_tunning = initc_tunning
+        self.initc_tunning = initc_tunning
 
         # Recurrent encoder/decoder models
-        self.encoder = ConvLSTMCell(img_c + h_dim,
-                                    h_dim,
-                                    kernel_size=5,
-                                    stride=1,
-                                    padding=2)
+        kwargs = dict(kernel_size=5, stride=1, padding=2)
+        # kwargs = dict(kernel_size=3, stride=1, padding=1)
 
-        self.decoder = ConvLSTMCell(img_c + z_dim + cond_size,
-                                    h_dim,
-                                    kernel_size=5,
-                                    stride=1,
-                                    padding=2)
+        self.encoder = ConvLSTMCell(imc + h_dim, h_dim, **kwargs)
+        self.decoder = ConvLSTMCell(imc + z_dim + cond_dim, h_dim, **kwargs)
 
-        #
-        self.write = nn.Conv2d(h_dim, 2 * img_c, kernel_size=1, stride=1)
+        # write outputs
+        self.write = nn.Conv2d(h_dim, 2 * imc, kernel_size=1, stride=1)
 
         # parameters of distributions
-        self.posterior = nn.Conv2d(h_dim,
-                                   2 * z_dim,
-                                   kernel_size=5,
-                                   stride=1,
-                                   padding=2)
-        self.prior = nn.Conv2d(h_dim,
-                               2 * z_dim,
-                               kernel_size=5,
-                               stride=1,
-                               padding=2)
+        self.posterior = nn.Conv2d(h_dim, 2 * z_dim, **kwargs)
+        self.prior = nn.Conv2d(h_dim, 2 * z_dim, **kwargs)
 
         self.init_hidden()
+        self.init_weights()
 
     def init_hidden(self):
 
         shape = (self.h, self.w)
-        self.h_enc = torch.zeros(1, self.h_size, *shape)
-        self.c_enc = torch.zeros(1, self.h_size, *shape)
+        self.h_enc = torch.zeros(1, self.h_dim, *shape)
+        self.c_enc = torch.zeros(1, self.h_dim, *shape)
         self.h_dec = torch.zeros(1, self.c, self.h, self.w)
         self.c_dec = torch.zeros(1, self.c, self.h, self.w)
 
@@ -98,15 +85,25 @@ class DRAW(nn.Module):
             self.h_dec = nn.Parameter(self.h_dec, requires_grad=True)
             self.c_dec = nn.Parameter(self.c_dec, requires_grad=True)
 
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight,
+                                        mode="fan_out",
+                                        nonlinearity="relu")
+                if hasattr(m, "bias") and m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
     def forward(self, x: Tensor, cond: Tensor):
         batch_size = x.size(0)
 
         # img_c = 3
-        # z_dim = 32
+        # z_dim = 128
         # h_dim = 128
+
         # Hidden states initialization
-        # h_enc: encoder hidden state size = (B, 128, 32, 32)
-        # h_dec: decoder hidden state size = (B, 128, 32, 32)
+        # h_enc: encoder hidden state size = (B, h_dim, 32, 32)
+        # h_dec: decoder hidden state size = (B, h_dim, 32, 32)
         h_enc = self.h_enc.repeat(batch_size, 1, 1, 1)
         c_enc = self.c_enc.repeat(batch_size, 1, 1, 1)
         h_dec = self.h_enc.repeat(batch_size, 1, 1, 1)
@@ -120,28 +117,29 @@ class DRAW(nn.Module):
             epsilon = x - r  # (B, 3, 32, 32)
 
             # Infer posterior density from hidden state (W//8)
-            # (B, 3+3+128, 32, 32) ==> (B, 128, 32, 32)
+            # (B, 3+3+h_dim, 32, 32) ==> (B, h_dim, 32, 32)
             h_enc, c_enc = self.encoder(torch.cat([x, epsilon, h_dec], dim=1),
                                         h_enc, c_enc)
 
             # Prior
+            # (B, h_dim, 32, 32) ==> (B, 2*z_dim, 32, 32)
             p_mu, p_log_var = torch.chunk(self.prior(h_dec), 2, dim=1)
             p_std = torch.exp(p_log_var * 0.5)
             p_prior = Normal(p_mu, p_std)
 
             # Posterior distribution
-            # (B, 128, 32, 32) ==> 2*(B, 128, 32, 32)
+            # (B, h_dim, 32, 32) ==> (B, 2*z_dim, 32, 32)
             q_mu, q_log_var = torch.chunk(self.posterior(h_enc), 2, dim=1)
             q_std = torch.exp(q_log_var * 0.5)
             q_posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
-            # (B, 128, 32, 32)
+            # (B, z_dim, 32, 32)
             z = q_posterior.rsample()
 
             # Send representation through decoder
-            # cond: (B, CE), CE = x or y
-            #       (B, CE, Zshape)
+            # cond:  (B, CE)
+            # repeat (B, CE, z_dim)
             z_shape = z.size()[:-2]
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, *z_shape)
@@ -149,7 +147,7 @@ class DRAW(nn.Module):
                                         c_dec)
 
             # write output
-            # (B, 128, 32, 32) ==> 2*(B, 3, 32, 32)
+            # (B, h_dim, 32, 32) ==> 2*(B, 3, 32, 32)
             r_mu, r_log_var = torch.chunk(self.write(h_dec), 2, dim=1)
             r += r_mu
 
@@ -160,7 +158,7 @@ class DRAW(nn.Module):
         r_std = torch.exp(r_log_var * 0.5)
 
         # calculate loss
-        nll = -1 * torch.sum(Normal(x_const, r_std).log_prob(x))
+        nll = -1 * (torch.sum(Normal(x_const, r_std).log_prob(x)))
         kl = torch.mean(torch.sum(kl, dim=[1, 2, 3]))
 
         return x_const, kl, nll, r_std.detach().mean()

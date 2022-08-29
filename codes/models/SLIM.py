@@ -32,26 +32,21 @@ class SLIM(nn.Module):
             vocab_size = params["vocab_size"]
             cptn_embs_sz = params[
                 "cptn_embs_sz"]  # caption text embedding size
-            self.embedding = nn.Embedding(vocab_size, cptn_embs_sz)
             self.caption_encoder = CaptionEncoder(vocab_size=vocab_size,
                                                   embd_size=cptn_embs_sz)
 
             if pretrain is None:
                 # Scene representation netwerk
-                scnr_size = params["scnr_size"]  # scene repvector dim
-                scnr_hidden_dim = params[
-                    "scnr_hidden_dim"]  # scene rep. hidden
+                scnr_dim = params["scnr_dim"]  # scene repvector dim
+                scnr_h_dim = params["scnr_hidden_dim"]  # scene rep. hidden
                 input_size = cptn_embs_sz + vwp_embd_sz
 
                 self.viewpoint_encoder = nn.Linear(vwp_size, vwp_embd_sz)
-                self.rep_model = RepresentationNetwork(
-                    input_size=input_size,
-                    hidden_dim=scnr_hidden_dim,
-                    output_size=scnr_size)
+                self.rep_model = RepresentationNetwork(input_size=input_size,
+                                                       hidden_dim=scnr_h_dim,
+                                                       output_size=scnr_dim)
 
-            self.dropout = nn.Dropout(0.5)
-
-        if pretrain is None or pretrain.find("draw") == -1:
+        if pretrain is None or pretrain.find("draw") != -1:
             # Image generation network
             image_width = params["image_width"]
             image_height = params["image_height"]
@@ -59,34 +54,47 @@ class SLIM(nn.Module):
 
             # DRAW param
             iter_num = params["draw_iter_num"]
-            draw_h_size = params["draw_h_size"]
-            draw_z_size = params["draw_z_size"]
-            cond_size = vwp_embd_sz
+            draw_h_dim = params["draw_h_dim"]
+            draw_z_dim = params["draw_z_dim"]
+            cond_dim = vwp_embd_sz
             if pretrain is None:
-                cond_size += scnr_size
+                cond_dim += scnr_dim
 
-            self.viewpoint_target_encoder = nn.Linear(vwp_size, vwp_embd_sz)
+            self.target_viewpoint_encoder = nn.Linear(vwp_size, vwp_embd_sz)
             self.gen_model = DRAW(imw=image_width,
                                   imh=image_height,
                                   imc=image_color,
                                   iter_num=iter_num,
-                                  h_size=draw_h_size,
-                                  z_size=draw_z_size,
-                                  cond_size=cond_size,
+                                  h_dim=draw_h_dim,
+                                  z_dim=draw_z_dim,
+                                  cond_dim=cond_dim,
                                   initc_tunning=params["draw_initc_tunning"])
 
-    def init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight,
-                                        mode="fan_out",
-                                        nonlinearity="sigmoid")
-                if hasattr(m.weight, "bias") and m.weight.bias is not None:
-                    nn.init.constant_(m.weight.bias, 0)
+        self.init_weights()
 
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+    def init_weights(self):
+        if hasattr(self, "viewpoint_encoder"):
+            nn.init.xavier_uniform_(self.viewpoint_encoder.weight.data)
+        if hasattr(self, "target_viewpoint_encoder"):
+            nn.init.xavier_uniform_(self.target_viewpoint_encoder.weight.data)
+
+    def freeze_draw(self, freeze=True):
+        for p in self.target_viewpoint_encoder.parameters():
+            p.requires_grad = not freeze
+
+        for p in self.gen_model.parameters():
+            p.requires_grad = not freeze
+
+    def load_pretrained(self, pretrained: str):
+        pretrained_state = torch.load(pretrained,
+                                      map_location=torch.device("cpu"))
+        pretrained_state = pretrained_state["model"]
+        state = self.state_dict()
+        for pretrained_name, pretrained_param in pretrained_state.items():
+            if pretrained_name in state:
+                state[pretrained_name] = pretrained_param
+
+        self.load_state_dict(state)
 
     def forward(self, batch: List[Tensor]) -> Tensor:
 
@@ -94,33 +102,26 @@ class SLIM(nn.Module):
         # ------
         # batch_size: B
         # image shape: imh, imw, imc = 32, 32, 3
-        # other_scenes_number: N=9
+        # scenes_number: N=10 or 9
         # sequence_length: T
         # Caption encoder output size: CE
         # Viewpoints encoder output size: VE
         # Scene encoder output size: SE
 
-        if self.pretrain is None:
-            img = batch[0]  # (B, imc, imh, imw)
-            views = batch[1]  # (B, N=9, 2)
-            img_view = batch[2]  # (B)
-            tokens = batch[3]  # (B, N=9, T)
-        elif self.pretrain.find("draw") != 1:
-            img = batch[0]  # (B*10, imc, imh, imw)
-            views = batch[1]  # (B*10, 2)
-        else:
-            tokens = batch[3]  # (B*10, T)
+        images, img_view, other_views, tokens = batch
+        # images: scene image, (B, 3, imh, imh)
+        # img_view: the view angle of the image (B, 2)
+        # other_views: the other nine angles views (B, 9, 2)
+        # token: scene descriptiom of the the other nine angles views (B, 9, T)
 
         if self.pretrain is None or self.pretrain == "caption_encoder":
-            # Caption tokens embedding
-            tokens_embedd = self.dropout(self.embedding(tokens))
-            tokens_embedd = self.caption_encoder(tokens_embedd)
-            # (B, N=9, T, CE)
+            # scene description
+            tokens_embedd, attns = self.caption_encoder(tokens)
+            # (B, 9, T, CE)
 
             if self.pretrain is None:
                 # Camera angels encoding
-                vw_embedd = self.viewpoint_encoder(views)  # (B, N, VE)
-
+                vw_embedd = self.viewpoint_encoder(other_views)  # (B, 9, VE)
                 # Scenes representation
                 sentence_embedd = tokens_embedd.mean(2)
                 r = self.rep_model(cpt_embs=sentence_embedd,
@@ -128,35 +129,31 @@ class SLIM(nn.Module):
             else:
                 return tokens_embedd  # pretraining caption encoding
 
-        if not self.prtrn_c:
-            cond = self.viewpoint_target_encoder(img_view)  # (B, VE)
-            if not self.prtrn_d:
+        if self.pretrain is None or self.pretrain == "draw":
+            cond = self.target_viewpoint_encoder(img_view)  # (B, VE)
+            if self.pretrain is None:
                 cond = torch.cat((cond, r), dim=1)
 
             # Image generation training
-            output = self.gen_model(x=img, cond=cond)
+            output = self.gen_model(x=images, cond=cond)
 
-        return output
+        return output, attns if self.pretrain is None else output, None
 
     def generate(self, batch: List[Tensor]) -> Tensor:
 
-        img = batch[0]  # (B, imc, imh, imw)
-        views = batch[1]  # (B, N=9, 2)
-        img_view = batch[2]  # (B)
-        tokens = batch[3]  # (B, N=9, T)
+        images, other_views, img_view, tokens = batch
 
-        if not self.prtrn_d:
-            vw_embedd = self.viewpoint_encoder(views)  # (B, 10, VE)
-            tokens_embedd = self.embedding(tokens)
-            tokens_embedd = self.caption_encoder(
-                tokens_embedd)  # (B, 9, T, CE)
+        if self.pretrain is None:
+            vw_embedd = self.viewpoint_encoder(other_views)  # (B, 10, VE)
+            tokens_embedd, attns = self.caption_encoder(
+                tokens)  # (B, 9, T, CE)
             r = self.rep_model(cpt_embs=tokens_embedd.mean(2),
                                viewpoints=vw_embedd[:, 1:])  # (B, CE)
 
-        cond = self.viewpoint_target_encoder(img_view)  # (B, VE)
-        if not self.prtrn_d:
+        cond = self.target_viewpoint_encoder(img_view)  # (B, VE)
+        if self.pretrain is None:
             cond = torch.cat((cond, r), dim=1)
 
-        output = self.gen_model.generate(x=img, cond=cond)
+        output = self.gen_model.generate(x=images, cond=cond)
 
-        return output
+        return output, attns if self.pretrain is None else output, None

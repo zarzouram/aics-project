@@ -4,24 +4,7 @@ https://github.com/deepmind/slim-dataset/blob/master/reader.py#L60-L84
 """
 """Convert slim tfrecords to pt.gz files.
 
-This file converts tfrecords in DeepMind slim dataset to gzip files. Each
-tfrecord will be converted to multiple gzip files which contain a list of
-tuples.
-
-For example, when converting `turk_data` dataset with batch size of
-`100`, a single tfrecord file which contains `2000` sequences is converted
-to `20` gzip files which contain a list of `100` tuples.
-
-ex) train.tfrecord -> train-1.pt.gz, ..., train-20.pt.gz
-
-Each tuple has elements as following.
-
-basic: `(frames, cameras, top_down, captions, simple_captions)`.
-metadata: `(meta_shape, meta_color, meta_size, meta_obj_positions,
-meta_obj_rotations, meta_obj_colors)`.
-
-ref)
-https://github.com/deepmind/slim-dataset/blob/master/reader.py
+This file converts tfrecords in DeepMind slim dataset.
 """
 from typing import Dict
 
@@ -32,9 +15,11 @@ import pathlib
 from tqdm import tqdm
 
 import re
-from collections import Counter, OrderedDict
+from collections import Counter
 from itertools import chain
 import h5py
+import json
+import pickle
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import current_thread, Lock
@@ -42,6 +27,7 @@ from threading import current_thread, Lock
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import numpy as np
 import tensorflow as tf
+
 
 _NUM_VIEWS = 10
 _NUM_RAW_CAMERA_PARAMS = 3
@@ -276,6 +262,16 @@ def get_data(tf_dir, dataset, mode):
     return tfdataset
 
 
+def write_json(json_path: str, data) -> None:
+    with open(json_path, "w", encoding="utf8") as json_file:
+        json.dump(data, json_file, ensure_ascii=False, indent=4)
+
+
+def pickle_data(file_path: str, data):
+    with open(file_path, "wb") as pickle_handle:
+        pickle.dump(data, pickle_handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 if __name__ == "__main__":
     # tf.enable_eager_execution()
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -328,8 +324,7 @@ if __name__ == "__main__":
     if args.dataset == "turk":
         # build vocab
         words = list(chain.from_iterable(chain.from_iterable(ds.tokens)))
-        bow = Counter(words)
-        bow_dict = OrderedDict(bow.most_common())
+        bow = dict(Counter(words).most_common())
 
     # save images
     print("writing data to the desk...")
@@ -350,6 +345,10 @@ if __name__ == "__main__":
                                   compression="gzip",
                                   compression_opts=9)
 
-    print("writing finished.")
+    if args.dataset == "turk":
+        write_json(str(torch_dir / "tokens.json"), ds.tokens)
+        write_json(str(torch_dir / "bow.json"), bow)
+        pickle_data(str(torch_dir / "texts.pickle"), ds.texts)
 
+    print("writing finished.")
     print("Done")

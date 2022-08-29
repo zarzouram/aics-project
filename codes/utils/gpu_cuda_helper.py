@@ -51,10 +51,16 @@ def get_gpus_avail() -> List[Tuple[int, float]]:
 def select_device(device: str = "gpu"):
     if device == "cpu":
         return torch.device(device)
-    elif device == "gpu":
+    else:
         gpus_avail = get_gpus_avail()
         if gpus_avail:
-            return torch.device(f"cuda:{gpus_avail[0][0]}")
+            if device == "gpu":
+                return torch.device(f"cuda:{gpus_avail[0][0]}")
+            else:
+                if len(gpus_avail) >= 2:
+                    return [gpus_avail[0][0], gpus_avail[1][0]]
+                else:
+                    return torch.device(f"cuda:{gpus_avail[0][0]}")
         else:
             return torch.device("cpu")
 
