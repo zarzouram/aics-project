@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -96,7 +96,7 @@ class SLIM(nn.Module):
 
         self.load_state_dict(state)
 
-    def forward(self, batch: List[Tensor]) -> Tensor:
+    def forward(self, batch: List[Tensor]) -> Tuple[Tensor]:
 
         # Sizes:
         # ------
@@ -108,7 +108,12 @@ class SLIM(nn.Module):
         # Viewpoints encoder output size: VE
         # Scene encoder output size: SE
 
-        images, img_view, other_views, tokens = batch
+        if self.pretrain is None:
+            images, img_view, other_views, tokens, _ = batch
+        elif self.pretrain == "draw":
+            images, img_view = batch
+        else:
+            raise NotImplementedError
         # images: scene image, (B, 3, imh, imh)
         # img_view: the view angle of the image (B, 2)
         # other_views: the other nine angles views (B, 9, 2)
@@ -116,7 +121,7 @@ class SLIM(nn.Module):
 
         if self.pretrain is None or self.pretrain == "caption_encoder":
             # scene description
-            tokens_embedd, attns = self.caption_encoder(tokens)
+            tokens_embedd, _attns = self.caption_encoder(tokens)
             # (B, 9, T, CE)
 
             if self.pretrain is None:
@@ -137,11 +142,16 @@ class SLIM(nn.Module):
             # Image generation training
             output = self.gen_model(x=images, cond=cond)
 
-        return output, attns if self.pretrain is None else output, None
+        return output
 
-    def generate(self, batch: List[Tensor]) -> Tensor:
+    def generate(self, batch: List[Tensor]) -> Tuple[Tensor]:
 
-        images, other_views, img_view, tokens = batch
+        if self.pretrain is None:
+            images, img_view, other_views, tokens, _ = batch
+        elif self.pretrain == "draw":
+            images, img_view = batch
+        else:
+            raise NotImplementedError
 
         if self.pretrain is None:
             vw_embedd = self.viewpoint_encoder(other_views)  # (B, 10, VE)
@@ -156,4 +166,9 @@ class SLIM(nn.Module):
 
         output = self.gen_model.generate(x=images, cond=cond)
 
-        return output, attns if self.pretrain is None else output, None
+        if self.pretrain is None:
+            return output, attns
+        if self.pretrain == "draw":
+            return output
+        else:
+            raise NotImplementedError

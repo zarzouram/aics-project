@@ -27,3 +27,10 @@ def load_config_file(config_path: str) -> List[dict]:
 def save_config_file(config_path: str, data: dict) -> List[dict]:
     with open(config_path, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def seed_worker(worker_id):
+    # ref: https://pytorch.org/docs/stable/notes/randomness.html
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)

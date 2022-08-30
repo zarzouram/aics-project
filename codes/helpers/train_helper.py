@@ -1,10 +1,9 @@
-from typing import List, Optional, Union
+from typing import List, Optional
 from tqdm import tqdm
 # from tqdm import tqdm_notebook as tqdm
 
 import math
 
-import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -35,8 +34,10 @@ class Trainer():
 
         if device_ids is not None:
             self.model = nn.DataParallel(model, device_ids=device_ids)
+            self.dp = True
         else:
-            self.model = model.to(device)
+            self.dp = False
+        self.model = model.to(device)
 
         self.optims = optims
         self.schedulers = schedulers
@@ -108,9 +109,27 @@ class Trainer():
         self.load_states(state_path)
         self.run()
 
-    def step(self, batch, train):
+    # def get_output(
+    #         self, output: Union[Tuple[Tensor],
+    #                             Tuple[Tuple[Tensor]]]) -> Tuple[Tensor]:
+    #     # when using nn.DataParallel the output is a list of tensors of length
+    #     # equal to number of devices used.
+    #     # Stack the images and average the losses
+    #     if self.dp:
+    #         output = [torch.vstack(o) for o in zip(*output)]
+    #         output = [o.mean() if o.dim() == 2 else o for o in output]
+
+    #     if self.pretrain == "draw":
+    #         img_const, kl, nll, img_std = output
+    #     else:
+    #         img_const, kl, nll, img_std, _ = output
+
+    #     return img_const, kl, nll, img_std
+
+    def step(self, batch: List[Tensor], train: bool):
         with torch.set_grad_enabled(train):
-            img_const, kl, nll, img_std, _ = self.model(batch)
+            output = self.model([b.to(self.device) for b in batch])
+            img_const, kl, nll, img_std = output
             loss = nll + kl
             if train:
                 loss.backward()
@@ -137,17 +156,17 @@ class Trainer():
     def train(self):
         self.trainpb.set_description("Training ...")
         self.model.train()
+
         with tqdm(self.train_iter, leave=False, unit="image") as batch_trainpb:
             for batch in batch_trainpb:
-                batch_splitd = self.split_batch()
                 for optim in self.optims:
                     optim.zero_grad()
-                self.step(batch_splitd, train=True)
+                self.step(batch, train=True)
 
                 self.global_step += 1
                 self.trainpb.update(1)
 
-        if (self.global_step + 1) % (self.val_interval + 1) == 0:
+        if self.global_step % self.val_interval == 0:
             for scheduler in self.schedulers:
                 scheduler.step(epoch=self.global_step)
 
@@ -159,71 +178,12 @@ class Trainer():
         self.model.eval()
         with tqdm(self.val_iter, leave=False, unit="image") as valpb:
             for batch in valpb:
-                batch_splitd = self.split_batch()
-                self.step(batch_splitd, train=False)
+                self.step(batch, train=False)
 
         grid = self.tracking.track_best_images()
         self.tracking.update("val")
         self.plot("val")
         self.imgs_logger.add_image("Reconstruction", grid, self.global_step)
-
-    def split_batch(self, batch):
-        """Split batch into context and other views information. There are
-        ten images, ten camera angles, ten textual descriptions for each
-        scence in the batch. The goal is to split the batch into the following:
-            - Query context: a random camera angles and its image.
-            - Other views: the other nine angles and thier textual descriptions.
-        """
-        # batch_size: B
-        # image shape: imh, imw, imc = 32, 32, 3
-        # images, other_views, img_view, tokens = batch
-        # max sequence length: T
-        idxs, images, views, tokens, lengths = batch
-        idxs: Tensor  # (B)
-        images: Tensor  # (B, 10, imh, imw, imc )
-        views: Tensor  # (B, 10, 2)
-        tokens: Union[Tensor, None]  # (B, 10, T)
-        lengths: Union[Tensor, None]  # (B, 10)
-
-        # if B=1, i case of eval
-        idxs = torch.squeeze(idxs)
-        images = torch.squeeze(images)
-        views = torch.squeeze(views)
-        if self.pretrain is None:
-            tokens = torch.squeeze(tokens)
-            lengths = torch.squeeze(lengths)
-
-            # select a random context
-            b_sz, n = images.size()[:2]
-            idx_cntxt = np.random.choice(n, b_sz)  # (B)
-            image_query = images[torch.arange(b_sz),
-                                 idx_cntxt, :]  # (B, 3, 64, 64)
-            view_query = views[torch.arange(b_sz), idx_cntxt]  # (B, 2)
-
-            # get indecies for the other_views
-            idx_all = np.tile(np.arange(n), (b_sz, 1))  # (B, 10)
-            idx_other_bool = idx_all != idx_cntxt[:, None]  # (B, 10)
-            idx_other1 = idx_all[idx_other_bool]  # (B*9)
-            idx_other0 = np.repeat(np.arange(b_sz), n - 1)  # (B*9)
-
-            views_other = views[idx_other0, idx_other1, :]
-            views_other = views_other.view(b_sz, n - 1, -1)
-
-            tokens_other = tokens[idx_other0, idx_other1, :]
-            tokens_other = tokens_other.view(b_sz, n - 1, -1)
-
-            lengths_other = lengths[idx_other1]
-
-            return [
-                image_query.to(self.device),
-                view_query.to(self.device),
-                views_other.to(self.device),
-                tokens_other.to(self.device),
-                lengths_other.to(self.device)
-            ]
-
-        # pretrain draw
-        return [b.to(self.device) if b is not None else None for b in batch]
 
     def plot(self, phase: str):
         metrics = self.tracking.metrics[phase]
@@ -240,10 +200,7 @@ class Trainer():
         self.trainpb.initial = self.global_step
 
     def save_checkpoint(self):
-        if type(self.model) is nn.DataParallel:
-            model_state = self.model.module.state_dict()
-        else:
-            model_state = self.model.state_dict()
+        model_state = self.model.state_dict()
         optimizer_state = [optim.state_dict() for optim in self.optims]
         scheduler_state = [scd.state_dict() for scd in self.schedulers]
         tracking_state = self.tracking.states()
@@ -255,7 +212,7 @@ class Trainer():
         if self.best_model:
             filename += "_best"
 
-        save_path = f"{self.save_path}{filename}.pt"
+        save_path = str(self.save_path / f"{filename}.pt")
         state_dict = {
             "model_state": model_state,
             "optims_state": optimizer_state,

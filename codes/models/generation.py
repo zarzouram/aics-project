@@ -45,7 +45,7 @@ class DRAW(nn.Module):
 
         self.h = imh
         self.w = imw
-        self.x_dims = (imw, imh)
+        self.img_shape = (imw, imh)
         self.c = imc
 
         self.z_dim = z_dim
@@ -58,7 +58,7 @@ class DRAW(nn.Module):
         kwargs = dict(kernel_size=5, stride=1, padding=2)
         # kwargs = dict(kernel_size=3, stride=1, padding=1)
 
-        self.encoder = ConvLSTMCell(imc + h_dim, h_dim, **kwargs)
+        self.encoder = ConvLSTMCell(imc * 2 + h_dim, h_dim, **kwargs)
         self.decoder = ConvLSTMCell(imc + z_dim + cond_dim, h_dim, **kwargs)
 
         # write outputs
@@ -66,18 +66,17 @@ class DRAW(nn.Module):
 
         # parameters of distributions
         self.posterior = nn.Conv2d(h_dim, 2 * z_dim, **kwargs)
-        self.prior = nn.Conv2d(h_dim, 2 * z_dim, **kwargs)
+        self.prior = nn.Conv2d(h_dim, 2 * h_dim, **kwargs)
 
         self.init_hidden()
         self.init_weights()
 
     def init_hidden(self):
 
-        shape = (self.h, self.w)
-        self.h_enc = torch.zeros(1, self.h_dim, *shape)
-        self.c_enc = torch.zeros(1, self.h_dim, *shape)
-        self.h_dec = torch.zeros(1, self.c, self.h, self.w)
-        self.c_dec = torch.zeros(1, self.c, self.h, self.w)
+        self.h_enc = torch.zeros(1, self.h_dim, *self.img_shape)
+        self.c_enc = torch.zeros(1, self.h_dim, *self.img_shape)
+        self.h_dec = torch.zeros(1, self.h_dim, *self.img_shape)
+        self.c_dec = torch.zeros(1, self.h_dim, *self.img_shape)
 
         if self.initc_tunning:
             self.h_enc = nn.Parameter(self.h_enc, requires_grad=True)
@@ -103,10 +102,10 @@ class DRAW(nn.Module):
 
         # Hidden states initialization
         # h_enc: encoder hidden state size = (B, h_dim, 32, 32)
-        # h_dec: decoder hidden state size = (B, h_dim, 32, 32)
+        # h_dec: decoder hidden state size = (B, img_c, 32, 32)
         h_enc = self.h_enc.repeat(batch_size, 1, 1, 1)
         c_enc = self.c_enc.repeat(batch_size, 1, 1, 1)
-        h_dec = self.h_enc.repeat(batch_size, 1, 1, 1)
+        h_dec = self.h_dec.repeat(batch_size, 1, 1, 1)
         c_dec = self.c_dec.repeat(batch_size, 1, 1, 1)
 
         r = x.new_zeros((batch_size, self.c, self.h, self.w))
@@ -122,25 +121,25 @@ class DRAW(nn.Module):
                                         h_enc, c_enc)
 
             # Prior
-            # (B, h_dim, 32, 32) ==> (B, 2*z_dim, 32, 32)
+            # (B, 3, 32, 32) ==> (B, 2*3, 32, 32)
             p_mu, p_log_var = torch.chunk(self.prior(h_dec), 2, dim=1)
             p_std = torch.exp(p_log_var * 0.5)
-            p_prior = Normal(p_mu, p_std)
+            prior = Normal(p_mu, p_std)
 
             # Posterior distribution
             # (B, h_dim, 32, 32) ==> (B, 2*z_dim, 32, 32)
             q_mu, q_log_var = torch.chunk(self.posterior(h_enc), 2, dim=1)
             q_std = torch.exp(q_log_var * 0.5)
-            q_posterior = Normal(q_mu, q_std)
+            posterior = Normal(q_mu, q_std)
 
             # Sample from posterior
             # (B, z_dim, 32, 32)
-            z = q_posterior.rsample()
+            z = posterior.rsample()
 
             # Send representation through decoder
             # cond:  (B, CE)
             # repeat (B, CE, z_dim)
-            z_shape = z.size()[:-2]
+            z_shape = z.size()[-2:]
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
             cond_ = cond_.contiguous().repeat(1, 1, *z_shape)
             h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
@@ -152,7 +151,7 @@ class DRAW(nn.Module):
             r += r_mu
 
             # KL divergence
-            kl += kl_divergence(q_posterior, p_prior)
+            kl += kl_divergence(posterior, prior)
 
         x_const = torch.sigmoid(r)
         r_std = torch.exp(r_log_var * 0.5)
@@ -186,7 +185,7 @@ class DRAW(nn.Module):
             z = Normal(p_mu, p_std).sample()
 
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
-            cond_ = cond_.contiguous().repeat(1, 1, *z.size()[:-2])
+            cond_ = cond_.contiguous().repeat(1, 1, *z.size()[-2:])
             h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
                                         c_dec)
 

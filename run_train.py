@@ -1,7 +1,6 @@
 import argparse
 from datetime import datetime
 from pathlib import Path
-from tqdm import tqdm
 
 import torch
 from torch.utils.data import DataLoader, RandomSampler
@@ -9,13 +8,12 @@ from torch.optim import Adam
 
 from codes.dataset.dataset_batcher import SlimDataset
 from codes.models.SLIM import SLIM
-from codes.dataset.preprocessing import get_mini_batch
 from codes.helpers.scheduler import XfmrWarmupScheduler, LinearDecayLR
-# from codes.helpers.train_helper import Trainer
+from codes.helpers.train_helper import Trainer
 
 from codes.utils.gpu_cuda_helper import select_device
 from codes.utils.utils import seed_everything, save_config_file
-from codes.utils.utils import load_config_file
+from codes.utils.utils import load_config_file, seed_worker
 
 
 def parse_arguments():
@@ -49,174 +47,24 @@ def parse_arguments():
     parser.add_argument(
         "--pretrain",
         type=str,
-        default="",  #
+        default="draw",  #
         help="pretraining a submodule, {draw, caption_encoder}")
 
     parser.add_argument(
         "--freeze_gen",
         type=int,
         default=-1,  #
-        help="number of epochs to freeze the DRAW module")
+        help="number of steps to freeze the DRAW module")
 
     parser.add_argument(
         '--device',
         type=str,
-        default="mgpu",  # gpu, cpu
+        default="gpu",  # gpu, cpu
         help='Device to be used {gpu, mgpu, cpu}')
 
     args = parser.parse_args()
 
     return parser, args
-
-
-def run_train(train,
-              train_iter,
-              val_iter,
-              model,
-              optimizer,
-              scheduler,
-              configs,
-              var_scale,
-              vis,
-              win_name,
-              check_grad=False):
-
-    # other training param
-    train_param = configs["train_param"]
-    mini_batch_size = train_param["mini_batch_size"]
-    checkpoint_interv = train_param["checkpoint_interv"] * train.epoch_intv
-
-    while train.in_train:
-        train.local_steps = 0  # 1 epoch = SAMPLE_NUM local steps
-        train.train_loss = 0
-        train.epoch_loss = 0
-        train.kl_tain = 0
-        train.lx_train = 0
-        # train progress bar
-        train_pb = tqdm(total=train.epoch_intv, leave=False, unit="local_step")
-        # load one file (max 64 samples per file)
-        for train_batch in train_iter:
-            # progress bar one step
-            trn_mini_b = get_mini_batch(data=train_batch,
-                                        size_=mini_batch_size)
-
-            # train min batches
-            for data in trn_mini_b:
-
-                vs = next(var_scale)
-                train.step(model, optimizer, scheduler, data, vs)
-
-                best_model = False
-                # eval, each CHECK_POINT steps (every 5 epochs)
-                if (train.global_steps + 1) % checkpoint_interv == 0:
-                    train.val_loss = 0
-                    train.kl_val = 0
-                    train.lx_val = 0
-                    train.val_steps = 0
-                    for val_batch in val_iter:
-                        val_mini_batches = get_mini_batch(data=val_batch,
-                                                          size_=1)
-                        train.eval(model, val_mini_batches, var_scale.scale)
-
-                    train.val_loss = \
-                        train.val_loss / train.val_steps
-                    train.kl_val = \
-                        train.kl_val / train.val_steps
-                    train.lx_val = \
-                        train.lx_val / train.val_steps
-
-                    # update main progress bar
-                    train.postfix["test loss"] = train.val_loss
-                    train.trainpb.set_postfix(train.postfix)
-
-                    # plot validation, save plot
-                    vis.plot_line(train.val_loss, train.epoch, "Validation",
-                                  win_name[0])
-                    if len(vis.win_name.keys()) > 1:
-                        vis.plot_line(train.kl_val, train.epoch, "Validation",
-                                      win_name[2])
-                        vis.plot_line(train.lx_val, train.epoch, "Validation",
-                                      win_name[1])
-                    vis.vis.save([vis.env_name])
-
-                    # save model
-                    val_loss = round(train.val_loss, 2)
-                    best_loss = round(train.best_loss, 2)
-                    if val_loss <= best_loss:
-                        train.best_loss = train.val_loss
-                        best_model = True
-
-                    # # early stopping
-                    # if es.step(train.val_loss):
-                    #     train.train_loss = \
-                    #         train.train_loss / train.local_steps
-                    #     train.in_train = False
-
-                # End of epoch: Reach number of samples
-                if (train.global_steps + 1) % train.epoch_intv == 0:
-                    train.epoch_finished = True
-                    train.epoch_loss = train.epoch_loss / (train.local_steps +
-                                                           1)
-                    train.lx_train = train.lx_train / (train.local_steps + 1)
-                    train.kl_train = train.kl_train / (train.local_steps + 1)
-                    # plot, save plot
-                    vis.plot_line(train.epoch_loss, train.epoch, "Train",
-                                  win_name[0])
-                    if len(vis.win_name.keys()) > 1:
-                        vis.plot_line(train.kl_train, train.epoch, "Train",
-                                      win_name[2])
-                        vis.plot_line(train.lx_train, train.epoch, "Train",
-                                      win_name[1])
-                    vis.vis.save([vis.env_name])
-                    train.postfix["epoch loss"] = train.epoch_loss
-                    train.epoch += 1
-
-                # Reach the end of train loop
-                if (train.global_steps + 1) == train.end:
-                    train.in_train = False
-                    # self.train_loss = self.train_loss / self.local_steps
-
-                if check_grad:
-                    vis.plot_grad_norm(train.total_norm,
-                                       train.global_steps + 1,
-                                       "average gradient norm")
-
-                if train.epoch_finished:
-                    # save model and plot
-                    train.save_checkpoint(model,
-                                          optimizer,
-                                          scheduler,
-                                          var_scale.scale,
-                                          best_model=best_model)
-                    vis.vis.save([vis.env_name])
-
-                train.local_steps += 1
-                train.global_steps += 1
-
-                # update progress bars
-                desc_minib = f"LocalStep {train.local_steps}"
-                decc_epoch1 = f"Global Step {train.global_steps} "
-                decc_epoch2 = f"- epoch: {train.epoch}"
-
-                train_pb.set_postfix({"train loss": train.train_loss})
-                train.trainpb.set_postfix(train.postfix)
-
-                train_pb.set_description(desc_minib)
-                train.trainpb.set_description(decc_epoch1 + decc_epoch2)
-
-                train.trainpb.update(1)
-                train_pb.update(1)
-
-                if train.epoch_finished or not train.in_train:
-                    break
-
-            if train.epoch_finished or not train.in_train:
-                train.epoch_finished = False
-                train_pb.close()
-                if not train.in_train:
-                    print("\nTraining finished ...")
-                    train.trainpb.close()
-                break
 
 
 if __name__ == "__main__":
@@ -248,6 +96,7 @@ if __name__ == "__main__":
     assert freeze_logic, freeze_mssg
 
     # experiment status
+    vocab_path = None
     checkpoint_dir = Path(args.checkpoints_dir)
     if resume is None:
         time_tag = str(datetime.now().strftime("%d%m.%H%M"))  # exp. name
@@ -258,7 +107,7 @@ if __name__ == "__main__":
     else:  # resume from checkpoint
         time_tag = checkpoint_dir.parent
         checkpoint_path = checkpoint_dir / args.checkpoint_model
-        vocab_path = checkpoint_dir + "vocab.pt"
+        vocab_path = checkpoint_dir / "vocab.pt"
 
     # select a device
     device = select_device(args.device)
@@ -272,6 +121,8 @@ if __name__ == "__main__":
         device_ids = None
 
     # some parameters
+    if device_ids is not None:
+        config_loader["train"]["batch_size"] //= len(device_ids)
     minibatch_size = config_loader["train"]["batch_size"]
     num_samples = minibatch_size * configs_train["num_minibatch"]
     num_steps = configs_train["num_steps"]
@@ -279,6 +130,8 @@ if __name__ == "__main__":
     # seed
     seed = configs["seed"]
     seed_everything(seed)
+    g = torch.Generator()
+    g.manual_seed(seed)
 
     # training and validation dataloader
     ds_dir = args.dataset_dir + "train"
@@ -287,14 +140,20 @@ if __name__ == "__main__":
                            glove_name=configs_glove["name"],
                            glove_dir=configs_glove["dir"],
                            glove_dim=configs_glove["dim"],
-                           vocab_specials=vocab_specials)
+                           vocab_specials=vocab_specials,
+                           vocab_path=vocab_path)
     collate_fn = None if train_ds.tokens is None else train_ds.collate_fn
     sampler = RandomSampler(train_ds, num_samples=num_samples)
     train_iter = DataLoader(train_ds,
                             collate_fn=collate_fn,
                             pin_memory=device.type == "cuda",
                             sampler=sampler,
+                            worker_init_fn=seed_worker,
+                            generator=g,
                             **config_loader["train"])
+    if resume is None and pretrain != "draw":
+        vocab_path = checkpoint_dir / "vocab.pt"
+        torch.save(train_ds.vocab, vocab_path)
 
     ds_dir = args.dataset_dir + "val"
     val_ds = SlimDataset(root_dir=ds_dir,
@@ -302,7 +161,8 @@ if __name__ == "__main__":
                          glove_name=configs_glove["name"],
                          glove_dir=configs_glove["dir"],
                          glove_dim=configs_glove["dim"],
-                         vocab_specials=vocab_specials)
+                         vocab_specials=vocab_specials,
+                         vocab_path=vocab_path)
     collate_fn = None if val_ds.tokens is None else val_ds.collate_fn
     val_iter = DataLoader(val_ds,
                           collate_fn=collate_fn,
@@ -343,7 +203,38 @@ if __name__ == "__main__":
         }, {
             "params": model.gen_model.parameters()
         }]
-        if freeze_gen != -1:
-            optm_group.append(draw_parms)
+        if freeze_gen == -1:
+            optm_group.extend(draw_parms)
         optm = Adam(optm_group, lr=config_optm["lr_init"])
         scheduler = LinearDecayLR(optimizer=optm)
+
+    if pretrain is None:
+        optimizers = [xfmr_optm, optm]
+        schedulers = [xmfr_scheduler, scheduler]
+    elif pretrain == "draw":
+        optimizers = [optm]
+        schedulers = [scheduler]
+    else:
+        optimizers = [xfmr_optm]
+        schedulers = [xmfr_scheduler]
+
+    val_interv = configs_train["num_minibatch"] * configs_train["val_interv"]
+    log_dir = f"logs/{time_tag}"
+    train = Trainer(model=model,
+                    optims=optimizers,
+                    schedulers=schedulers,
+                    train_iter=train_iter,
+                    val_iter=val_iter,
+                    device=device,
+                    device_ids=device_ids,
+                    val_interv=val_interv,
+                    save_path=checkpoint_dir,
+                    log_dir=log_dir,
+                    seed=seed,
+                    total_steps=configs_train["num_steps"],
+                    pretrain=pretrain,
+                    freeze_gen=freeze_gen)
+    if resume:
+        train.resume(checkpoint_path)
+    else:
+        train.run()
