@@ -5,7 +5,6 @@ from tqdm import tqdm
 import math
 
 import torch
-import torch.nn as nn
 from torch import Tensor
 
 from torch.utils.tensorboard import SummaryWriter
@@ -27,16 +26,13 @@ class Trainer():
                  log_dir: str,
                  seed: int,
                  total_steps: int = int(1e6),
+                 lang_enc_train_steps: int = 20000,
+                 sigmas_const: List[float] = [2.0, 0.7],
                  val_interv: int = 499,
                  device_ids: Optional[List[int]] = None,
                  pretrain: Optional[str] = None,
                  freeze_gen: Optional[int] = None):
 
-        if device_ids is not None:
-            self.model = nn.DataParallel(model, device_ids=device_ids)
-            self.dp = True
-        else:
-            self.dp = False
         self.model = model.to(device)
 
         self.optims = optims
@@ -56,6 +52,11 @@ class Trainer():
         self.val_interval = val_interv
         self.best_loss = math.inf
 
+        # Pixel-variance annealing parameters
+        self.n = lang_enc_train_steps
+        self.sigma_f, self.sigma_i = sigmas_const
+        self.sigma_rate = (self.sigma_i - self.sigma_f) / 2e5
+
         # losses
         self.tracking = TrackMetrics()
         self.best_model = False
@@ -73,6 +74,9 @@ class Trainer():
             "kl": kl_logger,
             "std": std_logger
         }
+        self.lrs_logger = [
+            SummaryWriter(log_dir=f"{log_dir}/lrs") for _ in self.optims
+        ]
 
         self.save_path = save_path  # path to save best model
 
@@ -87,6 +91,22 @@ class Trainer():
             "best_loss": self.best_loss,
             "best_model": self.best_model
         }
+
+    def unfreez_draw(self):
+        self.model.freeze_draw(False)
+
+        draw_parms = {
+            "params": self.model.target_viewpoint_encoder.parameters()
+        }
+        self.optims[-1].add_param_group(draw_parms)
+        draw_parms = {"params": self.model.gen_model.parameters()}
+        self.optims[-1].add_param_group(draw_parms)
+
+    def sigma_annealing(self, phase):
+        # Pixel-variance annealing
+        if phase == "train":
+            self.sigma = max(self.sigma_i - self.sigma_rate * self.global_step,
+                             self.sigma_f)
 
     def run(self):
         seed_everything(self.seed)
@@ -104,45 +124,33 @@ class Trainer():
                         self.best_loss = self.tracking.last_metric()
 
                 self.save_checkpoint()
+                if self.global_step == self.freeze_gen:
+                    self.unfreez_draw()
 
     def resume(self, state_path):
         self.load_states(state_path)
         self.run()
 
-    # def get_output(
-    #         self, output: Union[Tuple[Tensor],
-    #                             Tuple[Tuple[Tensor]]]) -> Tuple[Tensor]:
-    #     # when using nn.DataParallel the output is a list of tensors of length
-    #     # equal to number of devices used.
-    #     # Stack the images and average the losses
-    #     if self.dp:
-    #         output = [torch.vstack(o) for o in zip(*output)]
-    #         output = [o.mean() if o.dim() == 2 else o for o in output]
-
-    #     if self.pretrain == "draw":
-    #         img_const, kl, nll, img_std = output
-    #     else:
-    #         img_const, kl, nll, img_std, _ = output
-
-    #     return img_const, kl, nll, img_std
-
     def step(self, batch: List[Tensor], train: bool):
+        phase = "train" if train else "val"
         with torch.set_grad_enabled(train):
-            output = self.model([b.to(self.device) for b in batch])
-            img_const, kl, nll, img_std = output
+            self.sigma_annealing(phase)
+            output = self.model([b.to(self.device) for b in batch], self.sigma)
+            img_const, kl, nll = output
             loss = nll + kl
             if train:
                 loss.backward()
                 for optim in self.optims:
                     optim.step()
+                for scheduler in self.schedulers:
+                    scheduler.step()
 
         # track losses and generated images
-        phase = "train" if train else "val"
         track_dict = {
             "loss": loss.item(),
             "kl": kl.item(),
             "nll": nll.item(),
-            "std": img_std.item()
+            "std": self.sigma
         }
         self.tracking.add_running(track_dict, phase=phase)
 
@@ -166,10 +174,6 @@ class Trainer():
                 self.global_step += 1
                 self.trainpb.update(1)
 
-        if self.global_step % self.val_interval == 0:
-            for scheduler in self.schedulers:
-                scheduler.step(epoch=self.global_step)
-
         self.tracking.update("train")
         self.plot("train")
 
@@ -189,6 +193,13 @@ class Trainer():
         metrics = self.tracking.metrics[phase]
         for n, vs in metrics.items():
             self.writers[n].add_scalars(n, {phase: vs[-1]}, self.global_step)
+        if phase == "train":
+            lrs = [optim.param_groups[0]["lr"] for optim in self.optims]
+            for i, (lr, lr_logger) in enumerate(zip(lrs, self.lrs_logger)):
+                lr_logger.add_scalar(f"optim_{i}",
+                                     lr,
+                                     self.global_step,
+                                     new_style=True)
 
     def states(self):
         return self._state_dict

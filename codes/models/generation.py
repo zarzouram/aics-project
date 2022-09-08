@@ -62,7 +62,7 @@ class DRAW(nn.Module):
         self.decoder = ConvLSTMCell(imc + z_dim + cond_dim, h_dim, **kwargs)
 
         # write outputs
-        self.write = nn.Conv2d(h_dim, 2 * imc, kernel_size=1, stride=1)
+        self.write = nn.Conv2d(h_dim, imc, kernel_size=1, stride=1)
 
         # parameters of distributions
         self.posterior = nn.Conv2d(h_dim, 2 * z_dim, **kwargs)
@@ -93,7 +93,7 @@ class DRAW(nn.Module):
                 if hasattr(m, "bias") and m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
-    def forward(self, x: Tensor, cond: Tensor):
+    def forward(self, x: Tensor, cond: Tensor, sigma: Tensor):
         batch_size = x.size(0)
 
         # img_c = 3
@@ -147,20 +147,20 @@ class DRAW(nn.Module):
 
             # write output
             # (B, h_dim, 32, 32) ==> 2*(B, 3, 32, 32)
-            r_mu, r_log_var = torch.chunk(self.write(h_dec), 2, dim=1)
-            r += r_mu
+            r_mu = self.write(h_dec)
+            r = r + r_mu
 
             # KL divergence
             kl += kl_divergence(posterior, prior)
 
         x_const = torch.sigmoid(r)
-        r_std = torch.exp(r_log_var * 0.5)
+        sigma = x.new_ones((1,)) * sigma
 
         # calculate loss
-        nll = -1 * (torch.sum(Normal(x_const, r_std).log_prob(x)))
+        nll = -1 * (torch.sum(Normal(x_const, sigma).log_prob(x)))
         kl = torch.mean(torch.sum(kl, dim=[1, 2, 3]))
 
-        return x_const, kl, nll, r_std.detach().mean()
+        return x_const, kl, nll
 
     def generate(self, x, cond):
         """
@@ -184,12 +184,13 @@ class DRAW(nn.Module):
             p_std = torch.exp(p_log_var * 0.5)
             z = Normal(p_mu, p_std).sample()
 
+            z_shape = z.size()[-2:]
             cond_ = cond.clone().view(batch_size, -1, 1, 1)
-            cond_ = cond_.contiguous().repeat(1, 1, *z.size()[-2:])
+            cond_ = cond_.contiguous().repeat(1, 1, *z_shape)
             h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
                                         c_dec)
 
             r_mu, _ = torch.chunk(self.write(h_dec), 2, dim=1)
-            r += r_mu
+            r = r + r_mu
 
         return torch.sigmoid(r)

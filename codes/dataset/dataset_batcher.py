@@ -211,19 +211,11 @@ class SlimDataset(torch.utils.data.Dataset):
         # image shape: imh, imw, imc = 32, 32, 3
         # images, other_views, img_view, tokens = batch
         # max sequence length: T
-        idxs, images, views, tokens, lengths = batch
-        idxs: Tensor  # (B)
+        images, views, tokens, lengths = batch
         images: Tensor  # (B, 10, imh, imw, imc )
         views: Tensor  # (B, 10, 2)
         tokens: Tensor  # (B, 10, T)
         lengths: Tensor  # (B, 10)
-
-        # if B=1, i case of eval
-        idxs = torch.squeeze(idxs)
-        images = torch.squeeze(images)
-        views = torch.squeeze(views)
-        tokens = torch.squeeze(tokens)
-        lengths = torch.squeeze(lengths)
 
         # select a random context
         b_sz, n = images.size()[:2]
@@ -244,7 +236,7 @@ class SlimDataset(torch.utils.data.Dataset):
         tokens_other = tokens[idx_other0, idx_other1, :]
         tokens_other = tokens_other.view(b_sz, n - 1, -1)
 
-        lengths_other = lengths[idx_other1]
+        lengths_other = lengths[idx_other0, idx_other1].view(b_sz, -1)
 
         return [
             image_query, view_query, views_other, tokens_other, lengths_other

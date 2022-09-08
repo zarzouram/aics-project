@@ -1,6 +1,5 @@
 # %%
 import torch
-import torch.nn as nn
 from torch.optim import Adam
 import matplotlib.pyplot as plt
 
@@ -8,41 +7,43 @@ from helpers.scheduler import LinearDecayLR, XfmrWarmupScheduler
 
 # %%
 model = [torch.nn.Parameter(torch.randn(2, 2, requires_grad=True))]
-optimizer = Adam(model, lr=5e-4)
-lr_scheduler1 = XfmrWarmupScheduler(optimizer=optimizer,
-                                    warmup=8000,
-                                    step_num=1e6)
-
+optimizer = Adam(model, lr=1)
 lr_scheduler2 = LinearDecayLR(optimizer=optimizer)
 
 
 # %%
-for epoch in range(20):
-    for s in range(10):
-        optimizer.step()
-    lr_scheduler1.step(epoch=s)
+lrs = {}
+for epoch in range(1, int(1e6) + 1):
+    optimizer.step()
+    lr_scheduler2.step()
+    lr = optimizer.param_groups[0]["lr"]
+    lrs[epoch] = lr
 
 # %%
-epochs = list(range(int(1e6)))
 plt.figure(figsize=(8, 3))
-plt.plot(epochs, [lr_scheduler1.get_lr_factor(e) for e in epochs])
+plt.plot(list(lrs.keys()), list(lrs.values()))
 plt.ylabel("Learning rate factor")
 plt.xlabel("Iterations (in batches)")
-plt.title("Cosine Warm-up Learning Rate Scheduler")
 plt.show()
 
 # %%
-print([lr_scheduler1.get_lr_factor(e) for e in epochs][-1])
-print([lr_scheduler1.get_lr_factor(e) for e in epochs][20000])
+model = [torch.nn.Parameter(torch.randn(2, 2, requires_grad=True))]
+optimizer = Adam(model, lr=1)
+lr_scheduler1 = XfmrWarmupScheduler(optimizer=optimizer,
+                                    warmup=8000,
+                                    step_num=1e6)
 
 # %%
-epochs = list(range(int(1e6)))
+lrs = {}
+for epoch in range(1, int(1e6) + 1):
+    optimizer.step()
+    lr_scheduler1.step()
+    lr = optimizer.param_groups[0]["lr"]
+    lrs[epoch] = lr
+
+# %%
 plt.figure(figsize=(8, 3))
-plt.plot(epochs, [lr_scheduler2.get_lr_factor(e) for e in epochs])
+plt.plot(list(lrs.keys()), list(lrs.values()))
 plt.ylabel("Learning rate factor")
 plt.xlabel("Iterations (in batches)")
-plt.title("Cosine Warm-up Learning Rate Scheduler")
 plt.show()
-# %%
-print([lr_scheduler2.get_lr_factor(e) for e in epochs][-1])
-# %%

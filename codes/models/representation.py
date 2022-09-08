@@ -32,15 +32,13 @@ class RepresentationNetwork(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, cpt_embs: Tensor, viewpoints_embd: Tensor) -> Tensor:
+    def forward(self, cpt_embs: Tensor, viewpoints: Tensor) -> Tensor:
 
         # Scene representation
         # (B, N=9, CE+VE)
-        scene_vectors = torch.cat((cpt_embs, viewpoints_embd), dim=-1)
+        scene_vectors = torch.cat((cpt_embs, viewpoints), dim=-1)
 
         # Scene embedding  h (B, N=9, SE)
         h = self.scene_encoder(scene_vectors)
 
-        # aggregation
-        r = h.mean(1)  # (B, SE)
-        return r
+        return h

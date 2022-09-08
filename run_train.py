@@ -8,7 +8,7 @@ from torch.optim import Adam
 
 from codes.dataset.dataset_batcher import SlimDataset
 from codes.models.SLIM import SLIM
-from codes.helpers.scheduler import XfmrWarmupScheduler, LinearDecayLR
+from codes.helpers.scheduler import LinearDecayLR
 from codes.helpers.train_helper import Trainer
 
 from codes.utils.gpu_cuda_helper import select_device
@@ -121,11 +121,11 @@ if __name__ == "__main__":
         device_ids = None
 
     # some parameters
-    if device_ids is not None:
-        config_loader["train"]["batch_size"] //= len(device_ids)
     minibatch_size = config_loader["train"]["batch_size"]
     num_samples = minibatch_size * configs_train["num_minibatch"]
     num_steps = configs_train["num_steps"]
+    if freeze_gen != -1:
+        freeze_gen *= configs_train["num_minibatch"]
 
     # seed
     seed = configs["seed"]
@@ -164,10 +164,14 @@ if __name__ == "__main__":
                          vocab_specials=vocab_specials,
                          vocab_path=vocab_path)
     collate_fn = None if val_ds.tokens is None else val_ds.collate_fn
-    val_iter = DataLoader(val_ds,
-                          collate_fn=collate_fn,
-                          pin_memory=device.type == "cuda",
-                          **config_loader["val"])
+    val_iter = DataLoader(
+        val_ds,
+        collate_fn=collate_fn,
+        pin_memory=device.type == "cuda",
+        **config_loader["val"],
+        worker_init_fn=seed_worker,
+        generator=g,
+    )
 
     # Construt model
     if pretrain is None or pretrain == "caption_encoder":
@@ -175,22 +179,27 @@ if __name__ == "__main__":
     model = SLIM(params=hyperparameters, pretrain=pretrain)
     if load_pretrain is not None:
         model.load_pretrained(load_pretrain)
-        if freeze_gen != -1:  # freeze DRAW sub-module
-            model.freeze_draw()
+    if freeze_gen != -1:  # freeze DRAW sub-module
+        model.freeze_draw()
 
     elif pretrain is None or pretrain == "caption_encoder":
         vectors = train_ds.get_glove(train_ds.pad_value)
         model.caption_encoder.embedding.from_pretrained(vectors, freeze=False)
 
     # Optimizer
+    val_interv = configs_train["num_minibatch"] * configs_train["val_interv"]
+    step_interv = configs_train["num_minibatch"]
     optm_group = []
     if pretrain is None or pretrain == "caption_encoder":
         # transformet optimizer
         xfmr_optm = Adam(model.caption_encoder.parameters(),
-                         lr=config_optm["caption_encoder_lr"],
-                         betas=config_optm["caption_encoder_beta"],
-                         eps=1e-9)
-        xmfr_scheduler = XfmrWarmupScheduler(optimizer=xfmr_optm)
+                         lr=1,
+                         betas=config_optm["caption_encoder_beta"])
+        xmfr_scheduler = LinearDecayLR(optimizer=xfmr_optm,
+                                       lr_init=config_optm["xmfr_lr_init"],
+                                       lr_final=config_optm["xmfr_lr_final"],
+                                       step_num=configs_train["num_steps"],
+                                       step_interv=step_interv)
 
         # representation scene submodule optimizer
         if pretrain is None:
@@ -205,8 +214,12 @@ if __name__ == "__main__":
         }]
         if freeze_gen == -1:
             optm_group.extend(draw_parms)
-        optm = Adam(optm_group, lr=config_optm["lr_init"])
-        scheduler = LinearDecayLR(optimizer=optm)
+        optm = Adam(optm_group, lr=1)
+        scheduler = LinearDecayLR(optimizer=optm,
+                                  lr_init=config_optm["gen_lr_init"],
+                                  lr_final=config_optm["gen_lr_final"],
+                                  step_num=configs_train["num_steps"],
+                                  step_interv=step_interv)
 
     if pretrain is None:
         optimizers = [xfmr_optm, optm]
@@ -218,7 +231,6 @@ if __name__ == "__main__":
         optimizers = [xfmr_optm]
         schedulers = [xmfr_scheduler]
 
-    val_interv = configs_train["num_minibatch"] * configs_train["val_interv"]
     log_dir = f"logs/{time_tag}"
     train = Trainer(model=model,
                     optims=optimizers,
@@ -231,6 +243,7 @@ if __name__ == "__main__":
                     save_path=checkpoint_dir,
                     log_dir=log_dir,
                     seed=seed,
+                    sigmas_const=configs_train["sigmas_const"],
                     total_steps=configs_train["num_steps"],
                     pretrain=pretrain,
                     freeze_gen=freeze_gen)

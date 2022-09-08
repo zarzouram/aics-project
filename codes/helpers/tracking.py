@@ -51,8 +51,12 @@ class TrackMetrics:
         # you must track best images before updat the tracking metrics
         loss = self.running["val"][self.em]
         best_ids = np.array(loss).argsort()[:10]
-        img_gt = torch.vstack(self.image_tracking["img_gt"])[best_ids]
+        # generated images => range(0,1)
         img_gn = torch.vstack(self.image_tracking["img_gn"])[best_ids]
+        x_min, x_max = img_gn.min(), img_gn.max()
+        img_gn = (img_gn - x_min) / (x_max - x_min)
+        # ground truth images
+        img_gt = torch.vstack(self.image_tracking["img_gt"])[best_ids]
         imgs = torch.vstack([img_gt, img_gn])
         img_grid = make_grid(imgs, nrow=10)
 

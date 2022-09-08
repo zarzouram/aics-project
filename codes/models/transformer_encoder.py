@@ -39,7 +39,7 @@ class PositionalEncoding(nn.Module):
             (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
+        pe = pe.unsqueeze(0)
         self.register_buffer('pe', pe)
 
     def forward(self, x):
@@ -47,13 +47,13 @@ class PositionalEncoding(nn.Module):
         Args:
             x: the sequence fed to the positional encoder model (required).
         Shape:
-            x: [sequence length, batch size, embed dim]
-            output: [sequence length, batch size, embed dim]
+            x: [batch size, sequence length, embed dim]
+            output: [batch size, sequence length, embed dim]
         Examples:
             >>> output = pos_encoder(x)
         """
 
-        x = x + self.pe[:x.size(0), :].requires_grad_(False)
+        x = x + self.pe[:, :x.size(1)].requires_grad_(False)
         return self.dropout(x)
 
 
@@ -83,7 +83,7 @@ class EncoderLayer(nn.Module):
     def forward(self, src):
         attn_shape = (src.size(1), src.size(1))
         src_mask = torch.triu(torch.full(attn_shape, float("-inf")),
-                              diagonal=1)
+                              diagonal=1).to(src.device)
 
         x = self.norm1(src)
         x, weights = self.self_attn(x,
@@ -93,8 +93,8 @@ class EncoderLayer(nn.Module):
                                     need_weights=True,
                                     average_attn_weights=False)
         x = self.dropout1(x)
-        x += src
-        x += self.dropout2(self.ff(self.norm2(x)))
+        x = x + src
+        x = x + self.dropout2(self.ff(self.norm2(x)))
 
         return x, weights
 

@@ -96,7 +96,7 @@ class SLIM(nn.Module):
 
         self.load_state_dict(state)
 
-    def forward(self, batch: List[Tensor]) -> Tuple[Tensor]:
+    def forward(self, batch: List[Tensor], s: float) -> Tuple[Tensor]:
 
         # Sizes:
         # ------
@@ -121,16 +121,20 @@ class SLIM(nn.Module):
 
         if self.pretrain is None or self.pretrain == "caption_encoder":
             # scene description
+            n = tokens.size(1)
+            tokens = tokens.view(-1, tokens.size()[-1])
             tokens_embedd, _attns = self.caption_encoder(tokens)
-            # (B, 9, T, CE)
+            # (B*9, T, CE)
 
             if self.pretrain is None:
                 # Camera angels encoding
-                vw_embedd = self.viewpoint_encoder(other_views)  # (B, 9, VE)
+                other_views = other_views.view(-1, other_views.size()[-1])
+                vw_embedd = self.viewpoint_encoder(other_views)  # (B*9, VE)
                 # Scenes representation
-                sentence_embedd = tokens_embedd.mean(2)
-                r = self.rep_model(cpt_embs=sentence_embedd,
-                                   viewpoints=vw_embedd[:, 1:])  # (B, CE)
+                h = self.rep_model(cpt_embs=tokens_embedd.mean(1),
+                                   viewpoints=vw_embedd)  # (B*9, CE)
+                # aggregation
+                r = h.view(-1, n, h.size()[-1]).mean(1)  # (B, SE)
             else:
                 return tokens_embedd  # pretraining caption encoding
 
@@ -140,7 +144,7 @@ class SLIM(nn.Module):
                 cond = torch.cat((cond, r), dim=1)
 
             # Image generation training
-            output = self.gen_model(x=images, cond=cond)
+            output = self.gen_model(x=images, cond=cond, sigma=s)
 
         return output
 
@@ -154,11 +158,17 @@ class SLIM(nn.Module):
             raise NotImplementedError
 
         if self.pretrain is None:
+            n = tokens.size(1)
+            tokens = tokens.view(-1, tokens.size()[-1])
+            tokens_embedd, attns = self.caption_encoder(tokens)
+            # (B*9, T, CE)
+
+            other_views = other_views.view(-1, other_views.size()[-1])
             vw_embedd = self.viewpoint_encoder(other_views)  # (B, 10, VE)
-            tokens_embedd, attns = self.caption_encoder(
-                tokens)  # (B, 9, T, CE)
-            r = self.rep_model(cpt_embs=tokens_embedd.mean(2),
-                               viewpoints=vw_embedd[:, 1:])  # (B, CE)
+            h = self.rep_model(cpt_embs=tokens_embedd.mean(1),
+                               viewpoints=vw_embedd)  # (B*9, CE)
+            # aggregation
+            r = h.view(-1, n, h.size()[-1]).mean(1)  # (B, SE)
 
         cond = self.target_viewpoint_encoder(img_view)  # (B, VE)
         if self.pretrain is None:
