@@ -27,7 +27,7 @@ class Trainer():
                  seed: int,
                  total_steps: int = int(1e6),
                  lang_enc_train_steps: int = 20000,
-                 sigmas_const: List[float] = [2.0, 0.7],
+                 sigmas_const: List[float] = [2.0, 0.7, 2e5],
                  val_interv: int = 499,
                  device_ids: Optional[List[int]] = None,
                  pretrain: Optional[str] = None,
@@ -54,25 +54,27 @@ class Trainer():
 
         # Pixel-variance annealing parameters
         self.n = lang_enc_train_steps
-        self.sigma_f, self.sigma_i = sigmas_const
-        self.sigma_rate = (self.sigma_i - self.sigma_f) / 2e5
+        self.sigma_f, self.sigma_i, num_steps = sigmas_const
+        self.sigma_rate = (self.sigma_i - self.sigma_f) / num_steps
+        self.sigma_annealing()
 
         # losses
         self.tracking = TrackMetrics()
         self.best_model = False
 
         # Tensorboard
-        self.logger = SummaryWriter(log_dir=f"{log_dir}/logs")
         loss_logger = SummaryWriter(log_dir=f"{log_dir}/loss")
         nll_logger = SummaryWriter(log_dir=f"{log_dir}/nll")
         kl_logger = SummaryWriter(log_dir=f"{log_dir}/kl")
         std_logger = SummaryWriter(log_dir=f"{log_dir}/std")
+        p_error_logger = SummaryWriter(log_dir=f"{log_dir}/p_error")
         self.imgs_logger = SummaryWriter(log_dir=f"{log_dir}/imgs")
         self.writers = {
             "loss": loss_logger,
             "nll": nll_logger,
             "kl": kl_logger,
-            "std": std_logger
+            "std": std_logger,
+            "p_error": p_error_logger,
         }
         self.lrs_logger = [
             SummaryWriter(log_dir=f"{log_dir}/lrs") for _ in self.optims
@@ -102,11 +104,10 @@ class Trainer():
         draw_parms = {"params": self.model.gen_model.parameters()}
         self.optims[-1].add_param_group(draw_parms)
 
-    def sigma_annealing(self, phase):
+    def sigma_annealing(self):
         # Pixel-variance annealing
-        if phase == "train":
-            self.sigma = max(self.sigma_i - self.sigma_rate * self.global_step,
-                             self.sigma_f)
+        self.sigma = max(self.sigma_i - self.sigma_rate * self.global_step,
+                         self.sigma_f)
 
     def run(self):
         seed_everything(self.seed)
@@ -124,6 +125,7 @@ class Trainer():
                         self.best_loss = self.tracking.last_metric()
 
                 self.save_checkpoint()
+                self.sigma_annealing()
                 if self.global_step == self.freeze_gen:
                     self.unfreez_draw()
 
@@ -134,9 +136,8 @@ class Trainer():
     def step(self, batch: List[Tensor], train: bool):
         phase = "train" if train else "val"
         with torch.set_grad_enabled(train):
-            self.sigma_annealing(phase)
             output = self.model([b.to(self.device) for b in batch], self.sigma)
-            img_const, kl, nll = output
+            img_const, kl, nll, p_error = output
             loss = nll + kl
             if train:
                 loss.backward()
@@ -150,14 +151,15 @@ class Trainer():
             "loss": loss.item(),
             "kl": kl.item(),
             "nll": nll.item(),
-            "std": self.sigma
+            "std": self.sigma,
+            "p_error": p_error,
         }
         self.tracking.add_running(track_dict, phase=phase)
 
         if not train:
             images = {
-                "img_gt": batch[0].to(torch.device("cpu")),
-                "img_gn": img_const.to(torch.device("cpu"))
+                "img_gt": batch[0].detach().to(torch.device("cpu")),
+                "img_gn": img_const.detach().to(torch.device("cpu"))
             }
             self.tracking.add_images(images)
 

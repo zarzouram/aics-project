@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torchvision.utils import make_grid
+from torchvision.transforms import Resize as resize
 
 
 class TrackMetrics:
@@ -15,6 +16,7 @@ class TrackMetrics:
         self.reset_running()
         self.metrics = self.init_metrics()
         self.image_tracking = defaultdict(list)
+        self.image_resize = resize((128, 128), antialias=True)
         self.em = "loss"  # metrics used in eval is loss
 
     def create_default_dict(self):
@@ -53,11 +55,14 @@ class TrackMetrics:
         best_ids = np.array(loss).argsort()[:10]
         # generated images => range(0,1)
         img_gn = torch.vstack(self.image_tracking["img_gn"])[best_ids]
-        x_min, x_max = img_gn.min(), img_gn.max()
-        img_gn = (img_gn - x_min) / (x_max - x_min)
+        img_gn = self.image_resize(img_gn)
+
         # ground truth images
         img_gt = torch.vstack(self.image_tracking["img_gt"])[best_ids]
-        imgs = torch.vstack([img_gt, img_gn])
+        img_gt = self.image_resize(img_gt)
+
+        # Generate Grid
+        imgs = torch.vstack((img_gt, img_gn))
         img_grid = make_grid(imgs, nrow=10)
 
         self.reset_image_tracking()

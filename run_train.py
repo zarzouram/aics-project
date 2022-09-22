@@ -47,7 +47,7 @@ def parse_arguments():
     parser.add_argument(
         "--pretrain",
         type=str,
-        default="draw",  #
+        default="",  #
         help="pretraining a submodule, {draw, caption_encoder}")
 
     parser.add_argument(

@@ -68,6 +68,9 @@ class DRAW(nn.Module):
         self.posterior = nn.Conv2d(h_dim, 2 * z_dim, **kwargs)
         self.prior = nn.Conv2d(h_dim, 2 * h_dim, **kwargs)
 
+        # tracking pixels reeoe
+        self.pixels_error = nn.MSELoss(reduction="none")
+
         self.init_hidden()
         self.init_weights()
 
@@ -108,7 +111,8 @@ class DRAW(nn.Module):
         h_dec = self.h_dec.repeat(batch_size, 1, 1, 1)
         c_dec = self.c_dec.repeat(batch_size, 1, 1, 1)
 
-        r = x.new_zeros((batch_size, self.c, self.h, self.w))
+        r = x.new_zeros((batch_size, self.c, self.h, self.w),
+                        requires_grad=True)
         kl = 0
         for _ in range(self.T):
 
@@ -154,13 +158,17 @@ class DRAW(nn.Module):
             kl += kl_divergence(posterior, prior)
 
         x_const = torch.sigmoid(r)
-        sigma = x.new_ones((1,)) * sigma
+        # r_min, r_max = r.min(), r.max()
+        # x_const = (r - r_min) / (r_max - r_min)
+        sigma_ = x.new_ones((1,), requires_grad=True) * sigma
 
         # calculate loss
-        nll = -1 * (torch.sum(Normal(x_const, sigma).log_prob(x)))
+        nll = -1 * (torch.sum(Normal(x_const, sigma_).log_prob(x)))
         kl = torch.mean(torch.sum(kl, dim=[1, 2, 3]))
+        pixels_loss = torch.sum(self.pixels_error(x_const, x), dim=[1, 2, 3])
+        pixels_loss = torch.mean(pixels_loss).item()
 
-        return x_const, kl, nll
+        return x_const, kl, nll, pixels_loss
 
     def generate(self, x, cond):
         """
