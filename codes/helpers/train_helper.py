@@ -61,6 +61,7 @@ class Trainer():
         # losses
         self.tracking = TrackMetrics()
         self.best_model = False
+        self.loss_minus = False
 
         # Tensorboard
         loss_logger = SummaryWriter(log_dir=f"{log_dir}/loss")
@@ -163,6 +164,9 @@ class Trainer():
             }
             self.tracking.add_images(images)
 
+        if loss.item() < 0:
+            self.loss_minus = True
+
     def train(self):
         self.trainpb.set_description("Training ...")
         self.model.train()
@@ -222,6 +226,8 @@ class Trainer():
         filename = "checkpoint"
         if self.pretrain == "draw":
             filename += "_draw"
+        if self.loss_minus:
+            filename += "_minus"
         if self.best_model:
             filename += "_best"
 
