@@ -22,7 +22,7 @@
         "test": {
             "batch_size": 1,
             "shuffle": false,
-            "num_workers": 4
+            "num_workers": 1
         }
     },
     "model_hyperparameter": {
@@ -51,7 +51,7 @@
         "num_minibatch": 100,
         "val_interv": 5,
         "num_steps": 1e6,
-        "sigmas_const": [0.1, 2.0, 9e5]
+        "sigmas_const": [0.1, 1.0, 2e5]
     }
 
 }

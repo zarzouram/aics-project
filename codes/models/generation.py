@@ -198,7 +198,7 @@ class DRAW(nn.Module):
             h_dec, c_dec = self.decoder(torch.cat([z, r, cond_], dim=1), h_dec,
                                         c_dec)
 
-            r_mu, _ = torch.chunk(self.write(h_dec), 2, dim=1)
+            r_mu = self.write(h_dec)
             r = r + r_mu
 
         return torch.sigmoid(r)
