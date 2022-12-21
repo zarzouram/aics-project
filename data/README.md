@@ -3,16 +3,16 @@
 - [1. General Description](#1-general-description)
 - [2. Download](#2-download)
 - [3. Dataset Conversion](#3-dataset-conversion)
-- [References](#references)
+- [4. References](#4-references)
 
 ## 1. General Description
 
-This dataset is used to train Spatial Language Integrating Model (SLIM) in [[1]](#1).
-It consists of virtual scenes with ten views for each scene. Each scene
-consists of two or three objects placed on a square walled room. Each view is
-represented by an image, and synthetic or natural language descriptions. View
-images are 3D pictures rendered from a particular scene from ten different
-camera viewpoints.
+This dataset is used to train Spatial Language Integrating Model (SLIM) in
+[[1]](#1).  It consists of virtual scenes with ten views for each scene. Each
+scene consists of two or three objects placed on a square walled room. Each
+view is represented by an image, and synthetic or natural language
+descriptions. View images are 3D pictures rendered from a particular scene from
+ten different camera viewpoints.
 
 ## 2. Download
 
@@ -21,15 +21,18 @@ from [here](https://console.cloud.google.com/storage/slim-dataset). Because the
 dataset is huge, about 600 GB, I downloaded the whole dataset except the
 `synthetic_data/train` data.
 
-Use the command below to download the dataset. After that, make sure to manually
-create `test`, `valid`, and `train` directories under the `turk_data` and move
-the respective files under them. The dataset directory should be as shown below.
+Use the command below to download the dataset.
 
 ```bash
 gsutil -m cp -c -L manifest.log -r \
   "gs://slim-dataset/turk_data/" \
   ./<DATASET_FOLDER>/
 ```
+
+After downloading is finished, make sure to manually create `test`, `valid`,
+and `train` directories under the `turk_data` and move the respective files
+under them. The dataset directory should be as shown below.
+
 
 ```none
 <DATASET_FOLDER>
@@ -42,22 +45,18 @@ gsutil -m cp -c -L manifest.log -r \
 
 ## 3. Dataset Conversion
 
-Dataset files are in `tfrecord` fromat. TFRecord file format is a binary storage
-format which are optimized to be used with Tensorflow. As I will use pyTorch, the dataset files
-are converted to `pt.gz` format. To convert the dataset, when you are under
-`data` directory, use the following command:
+Dataset files are in `tfrecord` fromat. TFRecord file format is a binary
+storage format which are optimized to be used with Tensorflow. As I will use
+pyTorch, the dataset files are converted to `pt.gz` format. To convert the
+dataset use the following command:
 
 ```bash
 ./convert_slim_dataset.sh <absolute_path/to/dataset_folder>
 ```
 
-After conversion, dataset directory will be as shown below. Code is based on
-[this](https://github.com/rnagumo/gqnlib/blob/master/examples/convert_slim_dataset.py)
-and [this](https://github.com/rnagumo/gqnlib/blob/master/bin/download_slim.sh).
-Changes are made to reduce the code excution time. Mainly, the vocabulary
-building is the bottleneck in the original script. As I am going to use Bert in
-this project, Bert tokenizer will be used and it is faster than building a
-dictionary of tokens.
+If you want to use the default value, just use: `./convert_slim_dataset.sh `
+
+After conversion, dataset directory will be as follows:
 
 ```none
 <DATASET_FOLDER>
@@ -73,7 +72,7 @@ dictionary of tokens.
 ```
 
 
-## References
+## 4. References
 
 <a id="1">[1]</a>
 Ramalho, T., Kočiský, T., Besse, F., Eslami, S. M., Melis, G., Viola, F., ... &

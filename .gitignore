@@ -407,3 +407,4 @@ data/models/*
 !data/models/slim_18-03-08h06_7485.pt
 .test
 .vscode
+paper
