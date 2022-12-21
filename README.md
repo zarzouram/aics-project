@@ -38,7 +38,7 @@ requirements.txt` to create virual env and to install the required libraries.
 Dataset download and conversion can be found
 [here](./data/README.md#2-download)
 
-### training the model
+### 3.3 training the model
 
 `run_train.py` expects the following arguments:
 
@@ -55,11 +55,8 @@ tensoboard files is `./logs`.
 python code/run_train.py [ARGUMENT]
 ```
 
-### 3.3. Results
 
-[Working on]
-
-### 3.4. Reference
+## 4. Reference
 
 <a id="1">[1]</a>  Ramalho, T., Kočiský, T., Besse, F., Eslami, S. M., Melis,
 G., Viola, F., ... & Hermann, K. M. (2018). Encoding spatial relations from
