@@ -24,11 +24,12 @@ reason.
 
 ## 2. Dataset
 
-Dataset information can be found [here](./data/README.md#1-general-description))
+Dataset information can be found
+[here](./data/README.md#1-general-description)
 
 ## 3. Code
 
-### 3.1. Requiremnts
+### 3.1. Requirements
 
 Code is tested using python 3.9. Use `conda create --name <env> --file
 requirements.txt` to create virual env and to install the required libraries.
@@ -38,7 +39,9 @@ requirements.txt` to create virual env and to install the required libraries.
 Dataset download and conversion can be found
 [here](./data/README.md#2-download)
 
-### 3.3 training the model
+Processed dataset files are under `/srv/data/zarzouram/lt2318/slim/turk_torch/`
+
+### 3.3. training the model
 
 `run_train.py` expects the following arguments:
 
@@ -48,15 +51,32 @@ Dataset download and conversion can be found
 4. checkpoint_model: if train resuming is needed pass the checkpoint filename
 5. device: either gpu or cpu
 
-Loss and evaluation metrics are tracked using Tensorboard. The path to
+Loss are tracked using Tensorboard. The path to
 tensoboard files is `./logs`.
 
 ```bash
 python code/run_train.py [ARGUMENT]
 ```
 
+You do not need to create new datasets, use `python code/run_train.py` to use
+the default arguments.
 
-## 4. Reference
+### 3.4. Testing
+
+Model testing are done in the `experiments.ipynb` notebook. The notebook is
+configured to load the test results done by me from
+`/srv/data/zarzouram/lt2318/test_outputs`.
+
+If you want to re-test the model, under the `Testing Model` section, please
+change the `retest` value to `True`.  Please do not forget to change the path
+in the `save_data` otherwise you will override the saved test results.
+
+## 4. Results
+
+Please see the attached report, under `paper`
+
+
+## 5. Reference
 
 <a id="1">[1]</a>  Ramalho, T., Kočiský, T., Besse, F., Eslami, S. M., Melis,
 G., Viola, F., ... & Hermann, K. M. (2018). Encoding spatial relations from

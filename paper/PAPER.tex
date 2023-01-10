@@ -17,13 +17,18 @@
 \usepackage{times}
 \usepackage{latexsym}
 \renewcommand{\UrlFont}{\ttfamily\small}
+\usepackage{amsmath}
 
 % This is not strictly necessary, and may be commented out,
 % but it will improve the layout of the manuscript,
 % and will typically save some space.
 \usepackage{microtype}
+\usepackage{graphicx} %package to manage images
+\usepackage{caption}
+\usepackage{subcaption}
+\graphicspath{ {images/} }
 
-%\aclfinalcopy % Uncomment this line for the final submission
+\aclfinalcopy % Uncomment this line for the final submission
 %\def\aclpaperid{***} %  Enter the acl Paper ID here
 
 %\setlength\titlebox{5cm}
@@ -34,501 +39,177 @@
 
 \newcommand\BibTeX{B\textsc{ib}\TeX}
 
-\title{Instructions for ACL 2020 Proceedings}
+\title{Encoding Spatial Relations from Natural Language}
 
-\author{First Author \\
-  Affiliation / Address line 1 \\
-  Affiliation / Address line 2 \\
-  Affiliation / Address line 3 \\
-  \texttt{email@domain} \\\And
-  Second Author \\
-  Affiliation / Address line 1 \\
-  Affiliation / Address line 2 \\
-  Affiliation / Address line 3 \\
-  \texttt{email@domain} \\}
+\author{Mohamed Zarzoura}
 
 \date{}
 
 \begin{document}
 \maketitle
+
 \begin{abstract}
-This document contains the instructions for preparing a manuscript for the proceedings of ACL 2020.
-The document itself conforms to its own specifications, and is therefore an example of what your manuscript should look like.
-These instructions should be used for both papers submitted for review and for final versions of accepted papers.
-Authors are asked to conform to all the directions reported in this document.
+
+ In Natural language processing (NLP) space, deep neural networks (NNs) successfully provide compositional representations of words and complex linguistic units. However, there is still an improvement in the area related to spatial language. Spatial language understanding is crucial in many applications
+ that need language grounding in a physical world, such as dialogue systems, conditioning driving, robots, etc. In this project,  I will try to build a system capable of processing textual spatial language from a particular perspective and converting it to a different perspective. The work is based on the DeepMind paper \cite{ramalho2018encoding}.
 \end{abstract}
-
-\section{Credits}
-
-This document has been adapted
-by Steven Bethard, Ryan Cotterrell and Rui Yan
-from the instructions for earlier ACL and NAACL proceedings, including those for
-ACL 2019 by Douwe Kiela and Ivan Vuli\'{c},
-NAACL 2019 by Stephanie Lukin and Alla Roskovskaya,
-ACL 2018 by Shay Cohen, Kevin Gimpel, and Wei Lu,
-NAACL 2018 by Margaret Michell and Stephanie Lukin,
-2017/2018 (NA)ACL bibtex suggestions from Jason Eisner,
-ACL 2017 by Dan Gildea and Min-Yen Kan,
-NAACL 2017 by Margaret Mitchell,
-ACL 2012 by Maggie Li and Michael White,
-ACL 2010 by Jing-Shing Chang and Philipp Koehn,
-ACL 2008 by Johanna D. Moore, Simone Teufel, James Allan, and Sadaoki Furui,
-ACL 2005 by Hwee Tou Ng and Kemal Oflazer,
-ACL 2002 by Eugene Charniak and Dekang Lin,
-and earlier ACL and EACL formats written by several people, including
-John Chen, Henry S. Thompson and Donald Walker.
-Additional elements were taken from the formatting instructions of the \emph{International Joint Conference on Artificial Intelligence} and the \emph{Conference on Computer Vision and Pattern Recognition}.
 
 \section{Introduction}
 
-The following instructions are directed to authors of papers submitted to ACL 2020 or accepted for publication in its proceedings.
-All authors are required to adhere to these specifications.
-Authors are required to provide a Portable Document Format (PDF) version of their papers.
-\textbf{The proceedings are designed for printing on A4 paper.}
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{SLIMExample.png}
+    \caption{example for a scene image view and its description. \textbf{[NL]} for natural language \textbf{[SYN]} for synthetic language. Taken from \cite{ramalho2018encoding}}
+    \label{fig:SLIMDATA}
+\end{figure*}
 
+Spatial language involves words and phrases describing objects' position, orientation, movement, and relationships in space. Examples of spatial language include terms such as "above," "below," "near," "far," "left," "right," "up," "down," and "through." These words are often used to describe the location or movement of objects in relation to other objects, such as when we say that an object is "above" another object or is "moving to the right" or "through" another object.
 
-\section{Electronically-available resources}
+Spatial language is an important aspect of human communication, as it allows us to describe and understand the world around us. For example, when we see a car moving, we might describe its movement using spatial language, saying that the car is moving "backward" or "forward." This allows us to communicate our observations clearly and helps us understand the spatial relationships between objects in the world around us. For example, we can describe the spatial properties of the moving car by saying the car on "the far left lane" is moving "forward".
 
-ACL provides this description and accompanying style files at
-\begin{quote}
-\url{http://acl2020.org/downloads/acl2020-templates.zip}
-\end{quote}
-We strongly recommend the use of these style files, which have been appropriately tailored for the ACL 2020 proceedings.
+In the field of artificial intelligence and natural language processing, spatial language is an important area of study. Researchers are developing algorithms and models that can understand and process spatial language, to improve the ability of computers and other machines to interpret and respond to natural language inputs. This has applications in language translation, image captioning, and spatial reasoning for machines.
 
-\paragraph{\LaTeX-specific details:}
-The templates include the \LaTeX2e{} source (\texttt{\small acl2020.tex}),
-the \LaTeX2e{} style file used to format it (\texttt{\small acl2020.sty}),
-an ACL bibliography style (\texttt{\small acl\_natbib.bst}),
-an example bibliography (\texttt{\small acl2020.bib}),
-and the bibliography for the ACL Anthology (\texttt{\small anthology.bib}).
+Deep neural network (DNN) models have proven successful in many natural language tasks. Their success is due to their ability to represent words and other complex linguistic structures in a distributed manner. However, as shown in the baseline experiments in the GOA dataset, DNNs fail to deal with tasks that need spatial language understanding \cite{hudsonGQANewDataset2019}. These results indicate that there are  areas of improvement in natural language understanding (NLU), and spatial language understanding is one of them.
 
-
-\section{Length of Submission}
-\label{sec:length}
-
-The conference accepts submissions of long papers and short papers.
-Long papers may consist of up to eight (8) pages of content plus unlimited pages for references.
-Upon acceptance, final versions of long papers will be given one additional page -- up to nine (9) pages of content plus unlimited pages for references -- so that reviewers' comments can be taken into account.
-Short papers may consist of up to four (4) pages of content, plus unlimited pages for references.
-Upon acceptance, short papers will be given five (5) pages in the proceedings and unlimited pages for references.
-For both long and short papers, all illustrations and tables that are part of the main text must be accommodated within these page limits, observing the formatting instructions given in the present document.
-Papers that do not conform to the specified length and formatting requirements are subject to be rejected without review.
+The paper "Encoding Spatial Relations from Natural Language" presents a system capable of capturing the semantics of spatial relations from natural language descriptions \citet{ramalho2018encoding}. The system uses a multi-modal objective to generate images of scenes from their textual descriptions. A new dataset was proposed for this reason. The internal representations are shown to be robust to meaning-preserving transformations of descriptions (paraphrase invariance; "a young woman in front of an old man" and "an old man behind a young woman."), and viewpoint invariance (changing of camera angle) is an emergent property of the system. The paper also introduces a large dataset of 3D scenes coupled with language descriptions from different viewpoints for training and evaluating the model.
 
-The conference encourages the submission of additional material that is relevant to the reviewers but not an integral part of the paper.
-There are two such types of material: appendices, which can be read, and non-readable supplementary materials, often data or code.
-Additional material must be submitted as separate files, and must adhere to the same anonymity guidelines as the main paper.
-The paper must be self-contained: it is optional for reviewers to look at the supplementary material.
-Papers should not refer, for further detail, to documents, code or data resources that are not available to the reviewers.
-Refer to Appendices~\ref{sec:appendix} and \ref{sec:supplemental} for further information.
+The authors demonstrate the effectiveness of this approach by generating images from angles not seen in the training data and showing that they correspond to language descriptions of the same scene from the new angle. They also show that the learned representations align well with human similarity judgments of scene descriptions.
 
-Workshop chairs may have different rules for allowed length and whether supplemental material is welcome.
-As always, the respective call for papers is the authoritative source.
-
-
-\section{Anonymity}
-As reviewing will be double-blind, papers submitted for review should not include any author information (such as names or affiliations). Furthermore, self-references that reveal the author's identity, \emph{e.g.},
-\begin{quote}
-We previously showed \citep{Gusfield:97} \ldots
-\end{quote}
-should be avoided. Instead, use citations such as
-\begin{quote}
-\citet{Gusfield:97} previously showed\ldots
-\end{quote}
-Please do not use anonymous citations and do not include acknowledgements.
-\textbf{Papers that do not conform to these requirements may be rejected without review.}
-
-Any preliminary non-archival versions of submitted papers should be listed in the submission form but not in the review version of the paper.
-Reviewers are generally aware that authors may present preliminary versions of their work in other venues, but will not be provided the list of previous presentations from the submission form.
-
-Once a paper has been accepted to the conference, the camera-ready version of the paper should include the author's names and affiliations, and is allowed to use self-references.
-
-\paragraph{\LaTeX-specific details:}
-For an anonymized submission, ensure that {\small\verb|\aclfinalcopy|} at the top of this document is commented out, and that you have filled in the paper ID number (assigned during the submission process on softconf) where {\small\verb|***|} appears in the {\small\verb|\def\aclpaperid{***}|} definition at the top of this document.
-For a camera-ready submission, ensure that {\small\verb|\aclfinalcopy|} at the top of this document is not commented out.
-
-
-\section{Multiple Submission Policy}
-Papers that have been or will be submitted to other meetings or publications must indicate this at submission time in the START submission form, and must be withdrawn from the other venues if accepted by ACL 2020. Authors of papers accepted for presentation at ACL 2020 must notify the program chairs by the camera-ready deadline as to whether the paper will be presented. We will not accept for publication or presentation the papers that overlap significantly in content or results with papers that will be (or have been) published elsewhere.
-
-Authors submitting more than one paper to ACL 2020 must ensure that submissions do not overlap significantly (>25\%) with each other in content or results.
-
-
-
-\section{Formatting Instructions}
-
-Manuscripts must be in two-column format.
-Exceptions to the two-column format include the title, authors' names and complete addresses, which must be centered at the top of the first page, and any full-width figures or tables (see the guidelines in Section~\ref{ssec:title-authors}).
-\textbf{Type single-spaced.}
-Start all pages directly under the top margin.
-The manuscript should be printed single-sided and its length should not exceed the maximum page limit described in Section~\ref{sec:length}.
-Pages should be numbered in the version submitted for review, but \textbf{pages should not be numbered in the camera-ready version}.
-
-\paragraph{\LaTeX-specific details:}
-The style files will generate page numbers when {\small\verb|\aclfinalcopy|} is commented out, and remove them otherwise.
-
-
-\subsection{File Format}
-\label{sect:pdf}
-
-For the production of the electronic manuscript you must use Adobe's Portable Document Format (PDF).
-Please make sure that your PDF file includes all the necessary fonts (especially tree diagrams, symbols, and fonts with Asian characters).
-When you print or create the PDF file, there is usually an option in your printer setup to include none, all or just non-standard fonts.
-Please make sure that you select the option of including ALL the fonts.
-\textbf{Before sending it, test your PDF by printing it from a computer different from the one where it was created.}
-Moreover, some word processors may generate very large PDF files, where each page is rendered as an image.
-Such images may reproduce poorly.
-In this case, try alternative ways to obtain the PDF.
-One way on some systems is to install a driver for a postscript printer, send your document to the printer specifying ``Output to a file'', then convert the file to PDF.
-
-It is of utmost importance to specify the \textbf{A4 format} (21 cm x 29.7 cm) when formatting the paper.
-Print-outs of the PDF file on A4 paper should be identical to the hardcopy version.
-If you cannot meet the above requirements about the production of your electronic submission, please contact the publication chairs as soon as possible.
-
-\paragraph{\LaTeX-specific details:}
-PDF files are usually produced from \LaTeX{} using the \texttt{\small pdflatex} command.
-If your version of \LaTeX{} produces Postscript files, \texttt{\small ps2pdf} or \texttt{\small dvipdf} can convert these to PDF.
-To ensure A4 format in \LaTeX, use the command {\small\verb|\special{papersize=210mm,297mm}|}
-in the \LaTeX{} preamble (below the {\small\verb|\usepackage|} commands) and use \texttt{\small dvipdf} and/or \texttt{\small pdflatex}; or specify \texttt{\small -t a4} when working with \texttt{\small dvips}.
-
-\subsection{Layout}
-\label{ssec:layout}
-
-Format manuscripts two columns to a page, in the manner these
-instructions are formatted.
-The exact dimensions for a page on A4 paper are:
-
-\begin{itemize}
-\item Left and right margins: 2.5 cm
-\item Top margin: 2.5 cm
-\item Bottom margin: 2.5 cm
-\item Column width: 7.7 cm
-\item Column height: 24.7 cm
-\item Gap between columns: 0.6 cm
-\end{itemize}
-
-\noindent Papers should not be submitted on any other paper size.
-If you cannot meet the above requirements about the production of your electronic submission, please contact the publication chairs above as soon as possible.
-
-\subsection{Fonts}
-
-For reasons of uniformity, Adobe's \textbf{Times Roman} font should be used.
-If Times Roman is unavailable, you may use Times New Roman or \textbf{Computer Modern Roman}.
-
-Table~\ref{font-table} specifies what font sizes and styles must be used for each type of text in the manuscript.
-
-\begin{table}
-\centering
-\begin{tabular}{lrl}
-\hline \textbf{Type of Text} & \textbf{Font Size} & \textbf{Style} \\ \hline
-paper title & 15 pt & bold \\
-author names & 12 pt & bold \\
-author affiliation & 12 pt & \\
-the word ``Abstract'' & 12 pt & bold \\
-section titles & 12 pt & bold \\
-subsection titles & 11 pt & bold \\
-document text & 11 pt  &\\
-captions & 10 pt & \\
-abstract text & 10 pt & \\
-bibliography & 10 pt & \\
-footnotes & 9 pt & \\
-\hline
-\end{tabular}
-\caption{\label{font-table} Font guide. }
-\end{table}
-
-\paragraph{\LaTeX-specific details:}
-To use Times Roman in \LaTeX2e{}, put the following in the preamble:
-\begin{quote}
-\small
-\begin{verbatim}
-\usepackage{times}
-\usepackage{latexsym}
-\end{verbatim}
-\end{quote}
-
-
-\subsection{Ruler}
-A printed ruler (line numbers in the left and right margins of the article) should be presented in the version submitted for review, so that reviewers may comment on particular lines in the paper without circumlocution.
-The presence or absence of the ruler should not change the appearance of any other content on the page.
-The camera ready copy should not contain a ruler.
-
-\paragraph{Reviewers:}
-note that the ruler measurements may not align well with lines in the paper -- this turns out to be very difficult to do well when the paper contains many figures and equations, and, when done, looks ugly.
-In most cases one would expect that the approximate location will be adequate, although you can also use fractional references (\emph{e.g.}, this line ends at mark $295.5$).
-
-\paragraph{\LaTeX-specific details:}
-The style files will generate the ruler when {\small\verb|\aclfinalcopy|} is commented out, and remove it otherwise.
-
-\subsection{Title and Authors}
-\label{ssec:title-authors}
-
-Center the title, author's name(s) and affiliation(s) across both columns.
-Do not use footnotes for affiliations.
-Place the title centered at the top of the first page, in a 15-point bold font.
-Long titles should be typed on two lines without a blank line intervening.
-Put the title 2.5 cm from the top of the page, followed by a blank line, then the author's names(s), and the affiliation on the following line.
-Do not use only initials for given names (middle initials are allowed).
-Do not format surnames in all capitals (\emph{e.g.}, use ``Mitchell'' not ``MITCHELL'').
-Do not format title and section headings in all capitals except for proper names (such as ``BLEU'') that are
-conventionally in all capitals.
-The affiliation should contain the author's complete address, and if possible, an electronic mail address.
-
-The title, author names and addresses should be completely identical to those entered to the electronical paper submission website in order to maintain the consistency of author information among all publications of the conference.
-If they are different, the publication chairs may resolve the difference without consulting with you; so it is in your own interest to double-check that the information is consistent.
-
-Start the body of the first page 7.5 cm from the top of the page.
-\textbf{Even in the anonymous version of the paper, you should maintain space for names and addresses so that they will fit in the final (accepted) version.}
-
-
-\subsection{Abstract}
-Use two-column format when you begin the abstract.
-Type the abstract at the beginning of the first column.
-The width of the abstract text should be smaller than the
-width of the columns for the text in the body of the paper by 0.6 cm on each side.
-Center the word \textbf{Abstract} in a 12 point bold font above the body of the abstract.
-The abstract should be a concise summary of the general thesis and conclusions of the paper.
-It should be no longer than 200 words.
-The abstract text should be in 10 point font.
-
-\subsection{Text}
-Begin typing the main body of the text immediately after the abstract, observing the two-column format as shown in the present document.
-
-Indent 0.4 cm when starting a new paragraph.
-
-\subsection{Sections}
-
-Format section and subsection headings in the style shown on the present document.
-Use numbered sections (Arabic numerals) to facilitate cross references.
-Number subsections with the section number and the subsection number separated by a dot, in Arabic numerals.
-
-\subsection{Footnotes}
-Put footnotes at the bottom of the page and use 9 point font.
-They may be numbered or referred to by asterisks or other symbols.\footnote{This is how a footnote should appear.}
-Footnotes should be separated from the text by a line.\footnote{Note the line separating the footnotes from the text.}
-
-\subsection{Graphics}
-
-Place figures, tables, and photographs in the paper near where they are first discussed, rather than at the end, if possible.
-Wide illustrations may run across both columns.
-Color is allowed, but adhere to Section~\ref{ssec:accessibility}'s guidelines on accessibility.
-
-\paragraph{Captions:}
-Provide a caption for every illustration; number each one sequentially in the form:
-``Figure 1. Caption of the Figure.''
-``Table 1. Caption of the Table.''
-Type the captions of the figures and tables below the body, using 10 point text.
-Captions should be placed below illustrations.
-Captions that are one line are centered (see Table~\ref{font-table}).
-Captions longer than one line are left-aligned (see Table~\ref{tab:accents}).
-
-\begin{table}
-\centering
-\begin{tabular}{lc}
-\hline
-\textbf{Command} & \textbf{Output}\\
-\hline
-\verb|{\"a}| & {\"a} \\
-\verb|{\^e}| & {\^e} \\
-\verb|{\`i}| & {\`i} \\
-\verb|{\.I}| & {\.I} \\
-\verb|{\o}| & {\o} \\
-\verb|{\'u}| & {\'u}  \\
-\verb|{\aa}| & {\aa}  \\\hline
-\end{tabular}
-\begin{tabular}{lc}
-\hline
-\textbf{Command} & \textbf{Output}\\
-\hline
-\verb|{\c c}| & {\c c} \\
-\verb|{\u g}| & {\u g} \\
-\verb|{\l}| & {\l} \\
-\verb|{\~n}| & {\~n} \\
-\verb|{\H o}| & {\H o} \\
-\verb|{\v r}| & {\v r} \\
-\verb|{\ss}| & {\ss} \\
-\hline
-\end{tabular}
-\caption{Example commands for accented characters, to be used in, \emph{e.g.}, \BibTeX\ names.}\label{tab:accents}
-\end{table}
-
-\paragraph{\LaTeX-specific details:}
-The style files are compatible with the caption and subcaption packages; do not add optional arguments.
-\textbf{Do not override the default caption sizes.}
-
-
-\subsection{Hyperlinks}
-Within-document and external hyperlinks are indicated with Dark Blue text, Color Hex \#000099.
-
-\subsection{Citations}
-Citations within the text appear in parentheses as~\citep{Gusfield:97} or, if the author's name appears in the text itself, as \citet{Gusfield:97}.
-Append lowercase letters to the year in cases of ambiguities.
-Treat double authors as in~\citep{Aho:72}, but write as in~\citep{Chandra:81} when more than two authors are involved. Collapse multiple citations as in~\citep{Gusfield:97,Aho:72}.
-
-Refrain from using full citations as sentence constituents.
-Instead of
-\begin{quote}
-  ``\citep{Gusfield:97} showed that ...''
-\end{quote}
-write
-\begin{quote}
-``\citet{Gusfield:97} showed that ...''
-\end{quote}
-
-\begin{table*}
-\centering
-\begin{tabular}{lll}
-\hline
-\textbf{Output} & \textbf{natbib command} & \textbf{Old ACL-style command}\\
-\hline
-\citep{Gusfield:97} & \small\verb|\citep| & \small\verb|\cite| \\
-\citealp{Gusfield:97} & \small\verb|\citealp| & no equivalent \\
-\citet{Gusfield:97} & \small\verb|\citet| & \small\verb|\newcite| \\
-\citeyearpar{Gusfield:97} & \small\verb|\citeyearpar| & \small\verb|\shortcite| \\
-\hline
-\end{tabular}
-\caption{\label{citation-guide}
-Citation commands supported by the style file.
-The style is based on the natbib package and supports all natbib citation commands.
-It also supports commands defined in previous ACL style files for compatibility.
-}
-\end{table*}
-
-\paragraph{\LaTeX-specific details:}
-Table~\ref{citation-guide} shows the syntax supported by the style files.
-We encourage you to use the natbib styles.
-You can use the command {\small\verb|\citet|} (cite in text) to get ``author (year)'' citations as in \citet{Gusfield:97}.
-You can use the command {\small\verb|\citep|} (cite in parentheses) to get ``(author, year)'' citations as in \citep{Gusfield:97}.
-You can use the command {\small\verb|\citealp|} (alternative cite without  parentheses) to get ``author year'' citations (which is useful for  using citations within parentheses, as in \citealp{Gusfield:97}).
-
-
-\subsection{References}
-Gather the full set of references together under the heading \textbf{References}; place the section before any Appendices.
-Arrange the references alphabetically by first author, rather than by order of occurrence in the text.
-
-Provide as complete a citation as possible, using a consistent format, such as the one for \emph{Computational Linguistics\/} or the one in the  \emph{Publication Manual of the American
-Psychological Association\/}~\citep{APA:83}.
-Use full names for authors, not just initials.
-
-Submissions should accurately reference prior and related work, including code and data.
-If a piece of prior work appeared in multiple venues, the version that appeared in a refereed, archival venue should be referenced.
-If multiple versions of a piece of prior work exist, the one used by the authors should be referenced.
-Authors should not rely on automated citation indices to provide accurate references for prior and related work.
-
-The following text cites various types of articles so that the references section of the present document will include them.
-\begin{itemize}
-\item Example article in journal: \citep{Ando2005}.
-\item Example article in proceedings, with location: \citep{borschinger-johnson-2011-particle}.
-\item Example article in proceedings, without location: \citep{andrew2007scalable}.
-\item Example arxiv paper: \citep{rasooli-tetrault-2015}.
-\end{itemize}
-
-
-\paragraph{\LaTeX-specific details:}
-The \LaTeX{} and Bib\TeX{} style files provided roughly follow the American Psychological Association format.
-If your own bib file is named \texttt{\small acl2020.bib}, then placing the following before any appendices in your \LaTeX{}  file will generate the references section for you:
-\begin{quote}\small
-\verb|\bibliographystyle{acl_natbib}|\\
-\verb|\bibliography{acl2020}|
-\end{quote}
-
-You can obtain the complete ACL Anthology as a Bib\TeX\ file from \url{https://aclweb.org/anthology/anthology.bib.gz}.
-To include both the anthology and your own bib file, use the following instead of the above.
-\begin{quote}\small
-\verb|\bibliographystyle{acl_natbib}|\\
-\verb|\bibliography{anthology,acl2020}|
-\end{quote}
-
-
-\subsection{Digital Object Identifiers}
-As part of our work to make ACL materials more widely used and cited outside of our discipline, ACL has registered as a CrossRef member, as a registrant of Digital Object Identifiers (DOIs), the standard for registering permanent URNs for referencing scholarly materials.
-
-All camera-ready references are required to contain the appropriate DOIs (or as a second resort, the hyperlinked ACL Anthology Identifier) to all cited works.
-Appropriate records should be found for most materials in the current ACL Anthology at \url{http://aclanthology.info/}.
-As examples, we cite \citep{goodman-etal-2016-noise} to show you how papers with a DOI will appear in the bibliography.
-We cite \citep{harper-2014-learning} to show how papers without a DOI but with an ACL Anthology Identifier will appear in the bibliography.
-
-\paragraph{\LaTeX-specific details:}
-Please ensure that you use Bib\TeX\ records that contain DOI or URLs for any of the ACL materials that you reference.
-If the Bib\TeX{} file contains DOI fields, the paper title in the references section will appear as a hyperlink to the DOI, using the hyperref \LaTeX{} package.
-
-
-\subsection{Appendices}
-Appendices, if any, directly follow the text and the
-references (but only in the camera-ready; see Appendix~\ref{sec:appendix}).
-Letter them in sequence and provide an informative title:
-\textbf{Appendix A. Title of Appendix}.
-
-\section{Accessibility}
-\label{ssec:accessibility}
-
-In an effort to accommodate people who are color-blind (as well as those printing to paper), grayscale readability is strongly encouraged.
-Color is not forbidden, but authors should ensure that tables and figures do not rely solely on color to convey critical distinctions.
-A simple criterion:
-All curves and points in your figures should be clearly distinguishable without color.
-
-\section{Translation of non-English Terms}
-
-It is also advised to supplement non-English characters and terms with appropriate transliterations and/or translations since not all readers understand all such characters and terms.
-Inline transliteration or translation can be represented in the order of:
-\begin{center}
-\begin{tabular}{c}
-original-form \\
-transliteration \\
-``translation''
-\end{tabular}
-\end{center}
-
-\section{\LaTeX{} Compilation Issues}
-You may encounter the following error during compilation:
-\begin{quote}
-{\small\verb|\pdfendlink|} ended up in different nesting level than {\small\verb|\pdfstartlink|}.
-\end{quote}
-This happens when \texttt{\small pdflatex} is used and a citation splits across a page boundary.
-To fix this, the style file contains a patch consisting of two lines:
-(1) {\small\verb|\RequirePackage{etoolbox}|} (line 455 in \texttt{\small acl2020.sty}), and
-(2) A long line below (line 456 in \texttt{\small acl2020.sty}).
-
-If you still encounter compilation issues even with the patch enabled, disable the patch by commenting the two lines, and then disable the \texttt{\small hyperref} package by loading the style file with the \texttt{\small nohyperref} option:
-
-\noindent
-{\small\verb|\usepackage[nohyperref]{acl2020}|}
-
-\noindent
-Then recompile, find the problematic citation, and rewrite the sentence containing the citation. (See, {\em e.g.}, \url{http://tug.org/errors.html})
-
-\section*{Acknowledgments}
-
-The acknowledgments should go immediately before the references. Do not number the acknowledgments section.
-Do not include this section when submitting your paper for review.
-
-\bibliography{anthology,acl2020}
+Overall, the paper presents an approach to learning spatial relations from language that can capture the invariances necessary for a human-like understanding of spatial descriptions. This is an important step towards building more human-like natural language processing systems.
+
+
+\section{Materials and methods}
+
+\subsection{The SLIM Dataset}
+
+\citet{ramalho2018encoding} propose the SLIM multimodel dataset consisting of spatial textual descriptions grounded in 3D images generated from ten million scenes. Dataset scenes are about two or three colored 3D objects in a room. Each scene has ten 3D images rendered from ten different random camera angles with a textual description for each rendered image which is syntactically generated. 
+
+Five thousand six hundred four scenes randomly selected from the ten million scenes form a smaller subset. This smaller dataset is called "natural language data," as humans provide the spatial textual description for each scene's view. In this project, I used "natural language data" (See Figure \ref{fig:SLIMDATA} taken from \citealt{ramalho2018encoding}).
+
+\subsection{The original SLIM model}
+
+
+\begin{figure*}[hbt]
+    \centering
+    \includegraphics[width=.7\linewidth]{SLIMModel.png}
+    \caption{My implementation of the Slim Model}
+    \label{fig:SLIMModel}
+\end{figure*}
+
+The model consists of two parts; the first is a representation network that creates a learned "scene representation" vector by encoding several textual descriptions and their respective view angles. The second part is  a generation network that generates images conditioned on the learned scene representation and a new view angle not seen by the representation network.
+
+\paragraph{The representation network} consists of a CNN-based language encoder followed by a layer normalization to encode the sequence of the embedded textual descriptions. The encoded sequence features are then merged using a mean aggregation function to produce a "sentence" encoding. A single-layer perceptron encodes the respective view angles. The angles and textual encoding are combined using a three-layers perceptron to create a learned vector representation per text-angle pair. A mean aggregation function merges the text-angle pair features to produce a single "scene representation" vector $r$.
+
+\paragraph{The generation network} is a conditional RNN variational auto-encoder that uses a convolutional LSTM cell \cite{2016arXiv160408772G}. The generation network is trained using a sampled scene image $d_t$ and its camera angle $c_t$ that the representation network has not seen. The "scene representation" vector "$r$ and the image angle $c_t$ conditioned the image reconstruction from the latent space $z$ where $\hat{d_t} = g(z, c_t, r) \approx d_t, q(z|d_t) = e(d_t)$.
+
+\subsection{The implemented SLIM model}
+
+In my implementation, I made the following changes; the implemented model is shown in Figure \ref{fig:SLIMModel}: 
+
+\subsubsection{The Language Encoder}
+
+I replaced the CNN language encoder with a transformer encoder. I use the transformer because it can contextualize the tokens' encoding and considers the tokens' order. By doing so, it is possible to differentiate between  'B is to the right of A' and 'A is to the right of B'.
+
+A possible way of utilizing the transformer is to use a pre-trained encoder and freeze, then fine-tune the encoder while training the generation model. However, the tokens embedding size of the pre-trained encoders are relatively bigger than what is used in the original SLIM paper, where the text's embedding of size 64 is concatenated with the camera angles embedding of size 32. On the other hand, the lowest embedding size (hidden size) of a pre-trained transformer encoder is 768. Such a big difference in embedding sizes may severely demolish the contribution of the camera angle embedding by dominating the big text embedding. Thus, instead of changing all the model's sizes to fit the new token size, I experimented with a smaller transformer encoder with the same encoding size as the original model.
+
+This decision introduces a difficulty in training the transformer. The issue was related to the warming rate of the transformer. Without a warming rate, the model never converges and overfits very fast, and I find it difficult to tune the warmup training parameters. So, I used the Pre-LN Transformer design \cite{xiong2020layer}, where the direct inputs to the two-sublayer are normalized. This design is different from the original design proposed by \citet{vaswani2017attention}, where the outputs of the sublayers are normalized after adding the residual connection.
+
+\subsubsection{Convolutional LSTM Simplification}
+I used a simplified version of the convolutional to reduce the model's complexity.
+LSTM cell. The convolutional LSTM \cite{2015arXiv150604214S} shares the same concept idea as the sequential LSTM \cite{7508408}, where the input, the output, and the current gates modulate the flow of information to the next cell state. However, the convolutional LSTM uses the peephole connection from the previous cell states ($c_{t-1}$) \cite{2015arXiv150604214S} in addition to the current input ($x_t$), and the previous hidden state ($h_{t-1}$), as shown in equations \ref{eq:LSTMFC}.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=.5\linewidth]{STD_Annlng.png}
+    \caption{Change in loss value due to fast and slow annealing of standard deviation}
+    \label{fig:stdannl}
+\end{figure*}
+
+
+\begin{equation}
+\begin{aligned}
+  f_t =& \sigma(W_f \ast x_t + V_f \ast h_{t-1} + U_f \circ c_{t - 1}\\ 
+         & + b_f)\\
+  i_t =& \sigma(W_i \ast x_t + V_i \ast h_{t-1} + U_i \circ c_{t - 1}\\ 
+         &  + b_i)\\
+  o_t =& \sigma(W_o \ast x_t + V_o \ast h_{t-1} + U_o \circ c_{t - 1},\\
+         & + b_o),
+\label{eq:LSTMFC}
+\end{aligned}
+\end{equation}
+
+where "$\ast$" denotes the convolution operator and "$\circ$" denotes the Hadamard product. In my implementation, I removed the peephole connection in each gate. The equations \ref{eq:LSTMFC}become as follows:
+
+\begin{equation}
+\begin{aligned}
+  f_t =& \sigma(W_f \ast x_t + V_f \ast h_{t-1} + b_f)\\
+  i_t =& \sigma(W_i \ast x_t + V_i \ast h_{t-1} + b_i)\\
+  o_t =& \sigma(W_o \ast x_t + V_o \ast h_{t-1} + b_o)
+\label{eq:LSTM}
+\end{aligned}
+\end{equation}
+
+\subsubsection{Loss calculation} \label{sec:losscalc}
+
+The model is trained using a loss function called the Evidence Lower BOund (ELBO) loss. This training process aims to learn the embedding vector $r$ \cite{2013arXiv1312.6114K}. The Kullback-Leibler divergence (KL-D) term constrains the learning process. This term measures the difference between the approximation of the learned distribution (the distribution of latent variable $z$ given the encoded latent variable $Q(z|h_{enc})$) and a prior standard Gaussian distribution, which has a mean of zero and a variance of one ($\mathcal{N}(0,1)$).
+
+In my implementation of the model, the KL-D term is not compared to the standard Gaussian distribution ($\mathcal{N}(0,1)$), but rather to the prior distribution of latent variable $z$ ($p(z)$). Additionally, in the original version of the model, the reconstruction loss is calculated based on the assumption that the output distribution follows a Bernoulli distribution. In my implementation, the reconstruction loss is calculated, assuming that the output follows a normal distribution. See Section \ref{sec:training} for more discussion about why I used the Normal distribution instead of the Bernoulli distribution.
+
+\subsubsection{Model Hyperparameters}
+
+The transformer encoder consists of a stacked four-layers encoder. Each encoder layer has a four-head self-attention block with a hidden size of 64 and a position-wise feed-Forward block with an inner layer with dimensionality ($d_{ff}$) of 200. The embedding layer has an output size of 64 and is initialized by 42B-token, 300d Glove pre-trained vectors \cite{pennington-etal-2014-glove}. All other parameters are the same as the original model. 
+
+\subsection{Training} \label{sec:training}
+
+The model is originally trained using the ADAM optimizer with a learning rate starting at $5e-5$ and linearly decayed to $5e-4$ over one million steps. I trained the model with the same learning rate for the image generation part; however, for the transformer language encoder, I used a faster learning rate that started at $1e-3$ and linearly decayed to $5e-4$ over one million steps. I used a faster learning rate for the transformer because the model training is highly demanding in terms of computational requirements hoping that the model will converge faster. Also, to speed up the training time, I calculate the reconstruction loss assuming that the output follows a normal distribution. By doing so, I can fast anneal the loss function's standard deviation by starting with a high standard deviation and gradually decreasing it over time. In my implementation, I started with a standard deviation of $1.0$ then and linearly reduced it to $0.1$ over $2e5$ steps. Figure \ref{fig:stdannl} shows the difference in the training time between the used annealing  and a slower configuration that started with a standard deviation of $2.0$ then and linearly reduced it to $0.1$ over one million steps.
+
+
+\begin{figure*}[t]
+    \centering
+    \begin{subfigure}[]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{output1.png}
+        \caption{}
+        \label{fig:output1}
+     \end{subfigure}
+     \begin{subfigure}[]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{output2.png}
+        \caption{}
+        \label{fig:output2}
+     \end{subfigure}
+    \caption{Ground truth images (first row), reconstructed images (middle), and generated images (last raw). (a) shows the best five images with the lowest reconstruction loss, while (b) shows the images with the highest reconstruction loss.}
+    \label{fig:outputs}
+\end{figure*}
+
+\subsection{Experiments}
+
+The model is tested against a separate test dataset using the following approaches:
+
+\paragraph{Training-like process:} In this approach, I passed the input images through the VAE's model (including the encoder and decoder networks) to obtain the predicted output. This approach is similar to the process used during training and allows you to see how well the model can reconstruct the input images.
+
+\paragraph{Generation process:} In this approach, I sampled a latent space from a normal distribution with a mean of zero and a standard deviation of one and passed it through the VAE's decoder network to obtain the predicted output.
+
+\section{Results and discussion}
+
+\paragraph{Images reconstruction:} Figure \ref{fig:outputs} shows the experiment's results. The figure shows that the images (with the lowest and highest loss) are reconstructed well. This result indicates that the model can reconstruct the input images. 
+
+\paragraph{Samples generation:} However, the model cannot generate new samples by sampling latent codes from the normal probability distribution. One notices that the model cannot generate the proper objects and can generate the room walls. The ability of the model to reconstruct the input images and its failure to generate new samples indicates that the model fails to encode the underlying structure of the images, and it learns only the room. This generation's failure may be due to my choice to speed up the training process because the model did get a suitable level of variability to assign values to the reconstructed data; the model cannot "explore" a wider range of values. 
+
+\paragraph{Text Embedding:} Talking about the language part is problematic because of the failure of the generation network.
+
+\section{Future Work}
+
+After properly model training, the following tests could be done:
+
+\paragraph{Semantic coherence analysis:} the authors examined how well the language representation is semantically consistent. They applied several sentence transformations on the base sentences in the test dataset. Then they measure the similarity between each base sentence representation and its transformations representation using the cosine distance. The transformations used are noun change, adjective change, preposition change, and meaning preservation. 
+
+In addition to using cosine distance, the transformer encoder's self-attention could be examined. Also, as the images are relatively simple; there are eight shaps, six spatial relations, three adjectives for sizes, and twenty-two  colors, an automatic algorithm could be developed to compare the transformed sentences with the generated images.
+
+\newpage
+\bibliography{acl2020}
 \bibliographystyle{acl_natbib}
 
-\appendix
 
-\section{Appendices}
-\label{sec:appendix}
-Appendices are material that can be read, and include lemmas, formulas, proofs, and tables that are not critical to the reading and understanding of the paper.
-Appendices should be \textbf{uploaded as supplementary material} when submitting the paper for review.
-Upon acceptance, the appendices come after the references, as shown here.
-
-\paragraph{\LaTeX-specific details:}
-Use {\small\verb|\appendix|} before any appendix section to switch the section numbering over to letters.
-
-
-\section{Supplemental Material}
-\label{sec:supplemental}
-Submissions may include non-readable supplementary material used in the work and described in the paper.
-Any accompanying software and/or data should include licenses and documentation of research review as appropriate.
-Supplementary material may report preprocessing decisions, model parameters, and other details necessary for the replication of the experiments reported in the paper.
-Seemingly small preprocessing decisions can sometimes make a large difference in performance, so it is crucial to record such decisions to precisely characterize state-of-the-art methods.
-
-Nonetheless, supplementary material should be supplementary (rather than central) to the paper.
-\textbf{Submissions that misuse the supplementary material may be rejected without review.}
-Supplementary material may include explanations or details of proofs or derivations that do not fit into the paper, lists of
-features or feature templates, sample inputs and outputs for a system, pseudo-code or source code, and data.
-(Source code and data should be separate uploads, rather than part of the paper).
-
-The paper should not rely on the supplementary material: while the paper may refer to and cite the supplementary material and the supplementary material will be available to the reviewers, they will not be asked to review the supplementary material.
 
 \end{document}
